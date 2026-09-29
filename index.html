@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15212E">
+<meta name="description" content="אפליקציית שטח לנהגי חלוקת גז — סבב יומי, סימון אספקה, קופה ודוח סגירה.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>סבב נהג גזגל</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&family=Secular+One&display=swap">
+<script defer src="vendor/pdf.min.js"></script>
+<script defer src="vendor/pdf.worker.min.js"></script>
+<style>
+:root{
+  --bg:#EDEFEA; --surface:#FFFFFF; --surface-2:#F6F7F4; --ink:#131B24; --muted:#5B6571; --line:#D8DCD4;
+  --accent:#E3601B; --accent-ink:#FFFFFF; --accent-soft:#FCE7DA;
+  --nav:#15212E; --nav-ink:#EEF1EC; --nav-muted:#8E9AA6;
+  --ok:#1B7F4D; --on-ok:#FFFFFF; --ok-bg:#DFF1E6; --bad:#BD3528; --bad-bg:#F7E0DC;
+  --warn:#7D5A00; --warn-bg:#FAEFC9; --info:#285683; --info-bg:#E1EAF4;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 6px 18px rgba(20,30,40,.07);
+  --display:"Secular One","Assistant",system-ui,sans-serif;
+  --body:"Assistant",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0D131A; --surface:#161F29; --surface-2:#1C2733; --ink:#EDF0EB; --muted:#9BA5B0; --line:#29343F;
+    --accent:#F0793A; --accent-ink:#1A0F08; --accent-soft:#3A2214;
+    --nav:#080C11; --nav-ink:#EDF0EB; --nav-muted:#7C8894;
+    --ok:#4DBA80; --on-ok:#08170F; --ok-bg:#132C1F; --bad:#EC6E60; --bad-bg:#371816; --warn:#E3B84B; --warn-bg:#30270D; --info:#86B4E2; --info-bg:#152536;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0D131A; --surface:#161F29; --surface-2:#1C2733; --ink:#EDF0EB; --muted:#9BA5B0; --line:#29343F;
+  --accent:#F0793A; --accent-ink:#1A0F08; --accent-soft:#3A2214;
+  --nav:#080C11; --nav-ink:#EDF0EB; --nav-muted:#7C8894;
+  --ok:#4DBA80; --on-ok:#08170F; --ok-bg:#132C1F; --bad:#EC6E60; --bad-bg:#371816; --warn:#E3B84B; --warn-bg:#30270D; --info:#86B4E2; --info-bg:#152536;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);margin:0}
+[hidden]{display:none!important}
+img{max-width:100%}
+body{font-family:var(--body);color:var(--ink);font-size:16px;line-height:1.45}
+#app{max-width:520px;margin:0 auto;padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.demo{background:var(--warn-bg);color:var(--warn);font-size:13px;font-weight:700;text-align:center;padding:6px 16px}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--nav);color:var(--nav-ink);padding:10px 16px 12px;display:grid;gap:8px}
+.topbar .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.topbar .j{font-size:13px;color:var(--nav-muted);font-weight:600}
+.topbar .cash{font-family:var(--display);font-size:20px}
+.topbar .cash small{font-family:var(--body);font-size:12px;color:var(--nav-muted);font-weight:600;margin-inline-start:6px}
+.bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+main{padding:16px;display:grid;gap:16px}
+h1,h2,h3{margin:0;text-wrap:balance}
+.eyebrow{font-size:12px;letter-spacing:.06em;font-weight:800;color:var(--muted)}
+.card{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);padding:16px;display:grid;gap:12px}
+.next{border-top:5px solid var(--accent);padding-top:14px}
+.next .name{font-family:var(--display);font-size:27px;line-height:1.15}
+.addr{font-size:18px;font-weight:600}
+.city{display:inline-block;margin-inline-start:6px;font-size:13px;font-weight:700;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:1px 9px;vertical-align:2px}
+.collect{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:12px 14px;font-weight:800}
+.collect .big{font-family:var(--display);font-size:28px;font-weight:400}
+.collect small{display:block;font-size:13px;font-weight:700}
+.c-collect{background:var(--accent-soft);color:var(--accent)}
+.c-verify{background:var(--warn-bg);color:var(--warn)}
+.c-paid{background:var(--ok-bg);color:var(--ok)}
+.c-credit{background:var(--info-bg);color:var(--info)}
+.items{display:flex;flex-wrap:wrap;gap:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;border:2px solid var(--ink);border-radius:10px;padding:4px 10px;font-weight:800;font-size:17px}
+.pill .kg{font-size:13px;font-weight:700;color:var(--muted)}
+.note{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
+.okbox{background:var(--ok-bg);color:var(--ok);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
+.mem{background:var(--surface-2);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;font-size:14px;display:grid;gap:6px}
+.mem img{border-radius:8px;max-height:140px;object-fit:cover}
+.acts{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px}
+.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:58px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface-2);font-weight:800;font-size:14px;text-decoration:none;color:var(--ink)}
+.act b{font-size:20px;line-height:1}
+.act.waze{background:var(--info-bg);border-color:transparent;color:var(--info)}
+.go{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.btn{border:0;border-radius:14px;min-height:60px;font-weight:800;font-size:19px;padding:0 14px}
+.btn-ok{background:var(--ok);color:var(--on-ok)}
+.btn-bad{background:var(--surface);color:var(--bad);border:2px solid var(--bad)}
+.btn-accent{background:var(--accent);color:var(--accent-ink)}
+.btn-ghost{background:transparent;border:2px solid var(--line);color:var(--ink)}
+.btn-sm{min-height:44px;font-size:16px;border-radius:11px}
+.list{display:grid;gap:8px}
+.li{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:10px;background:var(--surface);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow);text-align:start;border:0;width:100%}
+.li .n{font-family:var(--display);color:var(--muted);text-align:center}
+.li .t{font-weight:800;line-height:1.2}
+.li .s{font-size:14px;color:var(--muted)}
+.li .ctl{display:flex;gap:4px}
+.li.sel{outline:3px solid var(--accent)}
+.li.sel .n{color:var(--accent);font-size:20px}
+.ic{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--line);background:var(--surface-2);font-weight:800}
+.tag{font-size:12px;font-weight:800;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.t-ok{background:var(--ok-bg);color:var(--ok)} .t-bad{background:var(--bad-bg);color:var(--bad)} .t-acc{background:var(--accent-soft);color:var(--accent)} .t-info{background:var(--info-bg);color:var(--info)} .t-warn{background:var(--warn-bg);color:var(--warn)}
+.sec{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.sec h3{font-size:17px}
+.muted{color:var(--muted)}
+.nav{position:fixed;inset-inline:0;bottom:0;z-index:30;background:var(--nav);padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px))}
+.nav .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tab{background:transparent;border:0;color:var(--nav-muted);font-weight:800;font-size:14px;min-height:54px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.tab b{font-size:19px}
+.tab[aria-current="page"]{color:var(--nav-ink);background:rgba(255,255,255,.08)}
+.fab{position:fixed;z-index:31;bottom:calc(80px + env(safe-area-inset-bottom,0px));inset-inline-end:max(16px,calc(50% - 244px));min-height:52px;padding:0 18px;border-radius:999px;background:var(--accent);color:var(--accent-ink);border:0;font-size:17px;font-weight:800;box-shadow:var(--shadow)}
+.scrim{position:fixed;inset:0;background:rgba(8,12,17,.5);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:520px;max-height:92%;overflow:auto;border-radius:18px 18px 0 0;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));display:grid;gap:14px}
+.sheet .grab{width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet h2{font-family:var(--display);font-weight:400;font-size:23px}
+.field{display:grid;gap:6px}
+.field>label,.lbl{font-weight:800;font-size:14px;color:var(--muted)}
+.inp{width:100%;min-height:48px;border-radius:11px;border:1.5px solid var(--line);background:var(--surface);padding:8px 12px;font-size:17px}
+textarea.inp{min-height:70px;resize:vertical}
+.steps{display:grid;gap:8px}
+.step{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;background:var(--surface);border-radius:12px;padding:8px 12px}
+.step .l{font-weight:800}
+.step .l small{display:block;font-weight:600;font-size:13px;color:var(--muted)}
+.stp{display:flex;align-items:center;gap:6px}
+.stp button{width:46px;height:46px;border-radius:11px;border:1.5px solid var(--line);background:var(--surface-2);font-size:24px;font-weight:800}
+.stp output{min-width:34px;text-align:center;font-family:var(--display);font-size:24px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:2px solid var(--line);background:var(--surface);border-radius:12px;min-height:48px;padding:0 14px;font-weight:800;font-size:16px}
+.chip[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+.sum{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-radius:12px;padding:12px 14px;font-weight:800}
+.sum .big{font-family:var(--display);font-size:26px;font-weight:400}
+.photo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.thumb{width:64px;height:64px;object-fit:cover;border-radius:10px}
+.filebtn{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--line);border-radius:11px;min-height:48px;padding:0 14px;font-weight:800;background:var(--surface)}
+.filebtn.big{min-height:60px;border-style:solid;border-color:var(--accent);color:var(--accent);font-size:18px}
+.filebtn input{position:absolute;inset:0;opacity:0}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.err{font-size:14px;color:var(--bad);font-weight:800;margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--surface-2);border-radius:12px;padding:12px;display:grid;gap:2px}
+.kpi .v{font-family:var(--display);font-size:24px}
+.kpi .k{font-size:13px;font-weight:700;color:var(--muted)}
+.cgrid{display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;align-items:center}
+.cgrid .h{font-size:13px;font-weight:800;color:var(--muted);text-align:center}
+.cgrid .r{font-weight:800;padding-inline-end:4px}
+.cin{width:100%;min-height:60px;border-radius:12px;border:2px solid var(--line);background:var(--surface);text-align:center;font-family:var(--display);font-size:30px;padding:0 6px}
+.cin:focus{border-color:var(--accent);outline:none}
+.cin.has{border-color:var(--ink)}
+.msg{white-space:pre-line;background:var(--surface);border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;font-weight:700;line-height:1.5}
+.linkbtn{display:flex;align-items:center;justify-content:center;text-decoration:none}
+details.amg{background:var(--surface-2);border-radius:12px;padding:6px 12px 10px}
+details.amg summary{font-weight:800;cursor:pointer;min-height:40px;display:flex;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:start}
+th{font-size:12px;color:var(--muted);font-weight:800;letter-spacing:.04em}
+td.v,th.v{text-align:end}
+.tbl{overflow-x:auto}
+.report{font-size:15px;display:grid;gap:10px}
+.report h3{font-size:16px}
+.mismatch{color:var(--bad);font-weight:800}
+.match{color:var(--ok);font-weight:800}
+.hero{display:grid;gap:4px}
+.hero h1{font-family:var(--display);font-weight:400;font-size:30px}
+.toast{position:fixed;inset-inline:16px;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:50;max-width:488px;margin:0 auto;background:var(--ink);color:var(--bg);border-radius:12px;padding:12px 14px;font-weight:800;text-align:center}
+.done-li{opacity:.82}
+.center{text-align:center}
+.loading{display:grid;place-items:center;gap:10px;padding:40px 0;font-weight:800}
+.spin{width:36px;height:36px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.bar i{transition:none}}
+</style>
+
+<div id="app" dir="rtl" lang="he"></div>
+<div id="sheetRoot" dir="rtl" lang="he"></div>
+<div id="toastRoot" dir="rtl" lang="he"></div>
+
+<script>
+(function(){
+document.documentElement.setAttribute('dir','rtl');
+document.documentElement.setAttribute('lang','he');
+
+/* ================= constants ================= */
+var VAT = 1.18;                        /* Bashan stores discounts before VAT */
+var PRICE = {'1':150, '2':450};        /* gross prices printed on the BB-454 journal */
+var KG = {'1':'12', '2':'48'};         /* Bashan item codes: 1 = 12 kg, 2 = 48 kg */
+var TYPE_BY_CODE = {'01':'בהזמנה','02':'באספקה','03':'אשראי','04':'הוראת קבע'};
+var REASONS = ['לא ענה','לא שילם','אין גישה','ביקש לדחות','אחר'];
+var PAY = {cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המשרד', prepaid:'שולם מראש', unpaid:'לא שולם'};
+var POINTS = {me:'נדיר', eyal:'אייל', ramp:'רמפה'};
+var POINT_BTN = {me:'המשאית שלי', eyal:'משאית אייל', ramp:'רמפה', other:'אחר'};
+var MOMENTS = ['כניסה','יציאה','יציאה למתקן','סוף יום'];
+var CF = [ {k:'gm',l:'גמ',d:'גדול מלא'}, {k:'km',l:'קמ',d:'קטן מלא'}, {k:'gr',l:'גר',d:'גדול ריק'}, {k:'kr',l:'קר',d:'קטן ריק'} ];
+var AF = [ {k:'a5m',kg:'5',s:'מלא'}, {k:'a5r',kg:'5',s:'ריק'}, {k:'a25m',kg:'2.5',s:'מלא'}, {k:'a25r',kg:'2.5',s:'ריק'} ];
+var CITY_ORDER = {
+  ofakim:['אופקים','תלמי ביל"ו','מבועים','נתיבות','באר שבע'],
+  hovav: ['באר שבע','אופקים','תלמי ביל"ו','מבועים','נתיבות'],
+  here:  ['אופקים','תלמי ביל"ו','מבועים','נתיבות','באר שבע']
+};
+var START_LABEL = {ofakim:'מחסן אופקים', hovav:'רמת חובב', here:'המיקום שלי'};
+
+/* ================= sample journal (every name, address and number invented) ================= */
+function it(code,qty,price,desc){ code=String(code); return {code:code, qty:qty, price:price||PRICE[code], desc:desc||('מיכל '+KG[code]+' ק"ג')}; }
+function sampleStops(){
+  var S=[
+    ['167901','15210','משפחת אלמוג','הרצל','14','','','אופקים','באספקה',false,0,[it(1,1)],'תשלום במזומן',['050-0000101','']],
+    ['167902','20331','בית כנסת אוהל משה','ז\'בוטינסקי','3','','','אופקים','בהזמנה',true,0,[it(2,2)],'גבאי: יוסי 052-0000102',['08-0000103','']],
+    ['167903','9874','מאפיית הדרום','המלאכה','7','','','אופקים','אשראי',false,25.42,[it(2,1)],'',['08-0000104','050-0000105']],
+    ['167904','18855','דנה ושלומי פרץ','בעל הסולם','22','ב','5','נתיבות','באספקה',false,0,[it(1,1)],'',['054-0000106','052-0000107']],
+    ['167905','12004','חיים ביטון','הרב מימון','9','','','נתיבות','באספקה',false,16.95,[it(2,1)],'להתקשר לפני — כלב בחצר',['050-0000108','']],
+    ['167906','21388','משק גולן','משק','41','','','תלמי ביל"ו','באספקה',false,0,[it(2,2)],'הבלונים מאחורי הלול',['052-0000109','']],
+    ['167907','16620','רחל אזולאי','הגפן','6','','','מבועים','בהזמנה',true,0,[it(1,1)],'',['050-0000110','']],
+    ['167908','7741','מסעדת הגריל','קרן היסוד','18','','','באר שבע','אשראי',false,0,[it(2,2)],'',['08-0000112','054-0000113']],
+    ['167909','19450','יעקב ומרים דהן','רגר','102','','12','באר שבע','באספקה',false,0,[it(1,1)],'תשלום באשראי דרך המשרד',['050-0000114','08-0000115']],
+    ['167910','5521','אליהו מזרחי','יהודה הלוי','40','','','באר שבע','באספקה',false,8.47,[it(2,1)],'שולם',['052-0000116','']],
+    ['167911','14002','גן ילדים נרקיס','העצמאות','55','','','באר שבע','בהזמנה',true,0,[it(1,1)],'טל הזמין - 050-0000111',['08-0000117','']],
+    ['167912','22010','סלים אבו-קף','משעול הזית','3','','','באר שבע','באספקה',false,0,[it(2,1)],'תשלום במזומן',['050-0000118','']]
+  ];
+  return S.map(function(a,i){ return {id:a[0],row:i+1,cust:a[1],name:a[2],street:a[3],house:a[4],ent:a[5],apt:a[6],city:a[7],type:a[8],paidFlag:a[9],
+    discGross:Math.round(a[10]*VAT*100)/100, items:a[11], note:a[12], phones:a[13], status:'pending', result:null, hot:false}; });
+}
+
+/* ================= state ================= */
+var KEY = 'gazgal-driver-v3';
+var state, photos = {}, memPhotos = {}, draft = null, pdfReady = null;
+function fresh(keep){
+  return { source:'sample', journal:'11625', date:'29/09/2026', driver:'נדיר ואנונו', check:null,
+    stops:sampleStops(), phase:'morning', view:'route', start:'ofakim',
+    counts: keep ? keep.counts : [], memory: keep ? keep.memory : {} };
+}
+function load(){ try{ var r=localStorage.getItem(KEY); if(r){ var s=JSON.parse(r); if(s && s.stops) return s; } }catch(e){} return fresh(); }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+state = load();
+
+/* ================= helpers ================= */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function money(n){ n=Math.round((+n||0)*100)/100; return '₪'+n.toLocaleString('he-IL',{minimumFractionDigits:(n%1?2:0),maximumFractionDigits:2}); }
+function fmtD(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||''); return m ? m[3]+'/'+m[2]+'/'+m[1].slice(2) : (iso||''); }
+function addr(s){ var a=(s.street||'')+(s.house?' '+s.house:''); if(s.ent) a+=', כניסה '+s.ent; if(s.apt) a+=', דירה '+s.apt; return a; }
+function navQ(s){ return ((s.street||'')+' '+(s.house||'')+(s.city?', '+s.city:'')).trim(); }
+function itemLabel(i){ return KG[i.code] ? KG[i.code]+' ק״ג' : (i.desc||('פריט '+i.code)); }
+function gross(items,actual){ return items.reduce(function(t,i){ return t+(actual?(i.actual||0):i.qty)*i.price; },0); }
+function totalOf(s,actual){
+  var ord=gross(s.items,false), g=gross(s.items,actual), dg=s.discGross||0;
+  var d = ord ? dg*(g/ord) : 0;
+  return Math.max(0, Math.round((g-d)*100)/100);
+}
+function mode(s){
+  if(s.type==='אשראי') return 'credit';
+  if(s.type==='הוראת קבע') return 'standing';
+  if(s.paidFlag) return 'paid';
+  if(/שולם/.test(s.note||'')) return 'verify';
+  if(s.type==='באספקה') return 'collect';
+  return 'verify';
+}
+function collects(s){ var m=mode(s); return m==='collect' || m==='verify'; }
+function contacts(s){
+  var out=[], note=s.note||'', seen={};
+  function add(label,num){ var k=num.replace(/\D/g,''); if(!k || seen[k]) return; seen[k]=1; out.push({label:label,num:num}); }
+  var m=note.match(/טל[׳']?\s*הזמין\s*[-–:]?\s*(0[\d-]{8,11})/); if(m) add('המזמין (מההערה)', m[1]);
+  var g=note.match(/([א-ת]+)\s*[:\-]\s*([א-ת]+)\s+(0[\d-]{8,11})/); if(g) add(g[1]+' — '+g[2]+' (מההערה)', g[3]);
+  (s.phones||[]).forEach(function(p,i){ if(p) add('טלפון '+(i+1), p); });
+  return out;
+}
+function intl(num){ return '972'+String(num).replace(/\D/g,'').replace(/^0/,''); }
+function pending(){ return state.stops.filter(function(s){ return s.status==='pending'; }); }
+function done(){ return state.stops.filter(function(s){ return s.status!=='pending'; }); }
+function cur(){ return pending()[0] || null; }
+function cashTotals(){
+  var t={cash:0,cheque:0,office:0,unpaid:0,prepaid:0,nc:0,nq:0};
+  done().forEach(function(s){ var p=s.result && s.result.payment; if(!p || p.method==='none') return;
+    t[p.method]+=p.amount; if(p.method==='cash') t.nc++; if(p.method==='cheque') t.nq++; });
+  return t;
+}
+function payDetail(s){
+  var p=s.result.payment, out=PAY[p.method];
+  if(p.method==='cheque'){ if(p.no) out+=' מס׳ '+p.no; if(p.due) out+=' · לפירעון '+fmtD(p.due); if(!photos['q-'+s.id]) out+=' · ללא צילום'; }
+  return out;
+}
+function toast(msg){ var r=document.getElementById('toastRoot'); r.innerHTML='<div class="toast" role="status">'+esc(msg)+'</div>'; clearTimeout(toast.t); toast.t=setTimeout(function(){ r.innerHTML=''; },2600); }
+function readPhoto(file,cb){
+  if(!file) return; var fr=new FileReader();
+  fr.onload=function(){ var img=new Image(); img.onload=function(){
+      var k=Math.min(1,900/Math.max(img.width,img.height)), c=document.createElement('canvas');
+      c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72)); };
+    img.src=fr.result; };
+  fr.readAsDataURL(file);
+}
+
+/* ---------- stock counts ---------- */
+function pointName(c){ return c.point==='other' ? (c.pointText||'נקודה') : POINTS[c.point]; }
+function countLines(c){
+  var L=[];
+  CF.forEach(function(f){ if(c.v[f.k]) L.push(c.v[f.k]+' '+f.l); });
+  var am=AF.filter(function(f){ return c.v[f.k]; });
+  if(am.length){ L.push('אמגזיות'); am.forEach(function(f){ L.push(f.kg+' ק"ג '+c.v[f.k]+' '+f.s); }); }
+  return L;
+}
+function countMsg(c){ return [pointName(c)+' '+c.moment].concat(countLines(c)).join('\n'); }
+function lastCount(point,moment){ var r=null; state.counts.forEach(function(c){ if(c.point===point && c.moment===moment) r=c; }); return r; }
+function nextMoment(point){
+  var own=state.counts.filter(function(c){ return c.point===point; });
+  if(!own.length) return 'כניסה';
+  if(own[own.length-1].moment==='כניסה') return 'יציאה';
+  return state.phase==='route' ? 'סוף יום' : 'יציאה';
+}
+function countsList(){
+  if(!state.counts.length) return '<p class="hint">עוד אין ספירות היום.</p>';
+  return '<div class="list">'+state.counts.slice().reverse().map(function(c){
+    return '<div class="card" style="padding:12px;gap:8px"><div class="sec" style="margin:0"><b>'+esc(pointName(c)+' '+c.moment)+'</b><span class="muted num">'+esc(c.time)+'</span></div>'+
+    '<div class="msg">'+esc(countLines(c).join('\n'))+'</div>'+
+    '<div class="grid2"><a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/?text='+encodeURIComponent(countMsg(c))+'" target="_blank" rel="noopener">שלח לקבוצה</a>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-delcount="'+c.id+'">מחק</button></div></div>';
+  }).join('')+'</div>';
+}
+function cin(k,label){ return '<input class="cin num" id="c-'+k+'" data-cin="'+k+'" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" aria-label="'+label+'">'; }
+function updateCountMsg(){
+  var el=document.getElementById('cMsg'); if(!el || !draft) return;
+  el.textContent=countMsg({point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v});
+}
+
+/* ================= BB-454 journal import (runs on the phone; the file never leaves it) ================= */
+/* Column bands by the right edge of each text run, on an A4 page 595pt wide. Measured on a real journal. */
+var BAND_ORDER = [[550,'row'],[520,'order'],[505,'set'],[494,'tcode'],[470,'tlabel'],[440,'date'],[385,'cust'],[300,'name'],[230,'street'],[185,'house'],[160,'ent'],[135,'apt'],[112,'area'],[80,'disc'],[45,'total'],[-1,'paid']];
+var BAND_DETAIL = [[430,'note'],[330,'city'],[290,'p1'],[205,'p2'],[180,'code'],[110,'desc'],[70,'qty'],[-1,'price']];
+function band(r,bands,sc){ for(var i=0;i<bands.length;i++){ if(r>bands[i][0]*sc) return bands[i][1]; } return null; }
+async function pdfLines(buf){
+  var pdf=await pdfjsLib.getDocument({data:buf, isEvalSupported:false}).promise, pages=[];
+  for(var p=1;p<=pdf.numPages;p++){
+    var page=await pdf.getPage(p), tc=await page.getTextContent(), sc=page.getViewport({scale:1}).width/595;
+    var items=tc.items.filter(function(t){ return t.str && t.str.trim(); }).map(function(t){ return {s:t.str.trim(), x:t.transform[4], r:t.transform[4]+t.width, y:t.transform[5]}; });
+    items.sort(function(a,b){ return b.y-a.y || b.x-a.x; });
+    var lines=[];
+    items.forEach(function(t){ var L=lines[lines.length-1]; if(L && Math.abs(L.y-t.y)<=2.5) L.items.push(t); else lines.push({y:t.y, items:[t]}); });
+    lines.forEach(function(L){ L.items.sort(function(a,b){ return b.x-a.x; }); L.text=L.items.map(function(t){ return t.s; }).join(' '); L.sc=sc; });
+    pages.push(lines);
+  }
+  return pages;
+}
+function fields(L,bands){
+  var f={};
+  L.items.forEach(function(t){ var k=band(t.r,bands,L.sc); if(!k) return; f[k]=f[k] ? f[k]+' '+t.s : t.s; });
+  return f;
+}
+function isOrderLine(L){
+  var f=fields(L,BAND_ORDER);
+  return f.row && /^\d+$/.test(f.row) && f.order && /^\d{5,7}$/.test(f.order) ? f : null;
+}
+function parseJournal(pages){
+  var meta={journal:'',date:'',driver:''}, stops=[], sum={count:null,total:null}, s=null;
+  pages.forEach(function(lines){
+    lines.forEach(function(L){
+      var t=L.text;
+      if(!meta.journal && /יומן/.test(t) && /דוח/.test(t)){ var j=L.items.filter(function(i){ return /^\d{4,7}$/.test(i.s); })[0]; if(j) meta.journal=j.s; return; }
+      if(!meta.driver && /^מחלק/.test(t)){
+        var parts=L.items.map(function(i){ return i.s; }), k=parts.indexOf('מחלק'), nm=[];
+        for(var i=k+2;i<parts.length && parts[i]!=='סטטוס';i++) nm.push(parts[i]);
+        meta.driver=nm.join(' ');
+        var d=parts.filter(function(x){ return /^\d\d\/\d\d\/\d{4}$/.test(x); })[0]; if(d) meta.date=d;
+        return;
+      }
+      if(/מצטבר/.test(t)){
+        var ints=L.items.filter(function(i){ return /^\d+$/.test(i.s); }), mons=L.items.filter(function(i){ return /^[\d,]+\.\d\d$/.test(i.s); });
+        if(ints[0]) sum.count=+ints[0].s; if(mons.length) sum.total=parseFloat(mons[mons.length-1].s.replace(/,/g,''));
+        s=null; return;
+      }
+      var of=isOrderLine(L);
+      if(of){
+        var tl=(of.tlabel||'').replace(/^=/,'').trim();
+        s={id:of.order, row:+of.row, cust:of.cust||'', name:of.name||'', street:of.street||'', house:of.house||'', ent:of.ent||'', apt:of.apt||'', city:'',
+           type: tl || TYPE_BY_CODE[of.tcode] || 'באספקה', paidFlag: /ש/.test(of.paid||''), disc: parseFloat(of.disc)||0,
+           total: parseFloat(String(of.total||'').replace(/,/g,''))||0, items:[], note:'', phones:['',''], status:'pending', result:null, hot:false};
+        stops.push(s); return;
+      }
+      if(!s) return;
+      if(/הערה/.test(t) && /ישוב/.test(t)) return;
+      var df=fields(L,BAND_DETAIL);
+      if(df.note) s.note = s.note ? s.note+' · '+df.note : df.note;
+      if(df.city && !s.city) s.city=df.city;
+      if(df.p1 && !s.phones[0]) s.phones[0]=df.p1;
+      if(df.p2 && !s.phones[1]) s.phones[1]=df.p2;
+      if(df.code && df.qty && df.price){
+        s.items.push({code:df.code.trim(), desc:(df.desc||'').trim(), qty:parseFloat(df.qty)||0, price:parseFloat(String(df.price).replace(/,/g,''))||0});
+      }
+    });
+  });
+  /* Bashan stores brackets mirrored: ")קומה" in the PDF is "(קומה" on paper */
+  function fixBr(v){ return String(v||'').replace(/[()]/g,function(ch){ return ch==='(' ? ')' : '('; }); }
+  stops.forEach(function(x){ x.name=fixBr(x.name); x.street=fixBr(x.street); x.note=fixBr(x.note); x.city=fixBr(x.city); });
+  /* derive the gross discount from Bashan's own total so the amount always matches the journal */
+  var cities={};
+  stops.forEach(function(x){ var g=gross(x.items,false); x.discGross = x.total ? Math.round((g-x.total)*100)/100 : 0; if(x.city) cities[x.city]=(cities[x.city]||0)+1; });
+  var topCity=Object.keys(cities).sort(function(a,b){ return cities[b]-cities[a]; })[0]||'';
+  stops.forEach(function(x){ if(!x.city){ x.city=topCity; x.cityGuess=true; } });
+  return {meta:meta, stops:stops, sum:sum};
+}
+async function importPdf(file){
+  if(!window.pdfjsLib){ toast('רכיב קריאת ה־PDF עוד לא נטען. בדוק קליטה ונסה שוב.'); return; }
+  document.getElementById('app').innerHTML=topbar()+'<main><div class="loading"><div class="spin"></div>קורא את היומן…</div></main>';
+  try{
+    var res=parseJournal(await pdfLines(await file.arrayBuffer()));
+    if(!res.stops.length) throw new Error('empty');
+    var tot=res.stops.reduce(function(t,x){ return t+x.total; },0);
+    var check={count:res.stops.length, total:Math.round(tot*100)/100, rCount:res.sum.count, rTotal:res.sum.total,
+      itemsMissing:res.stops.filter(function(x){ return !x.items.length; }).length};
+    check.ok = (check.rCount==null || check.rCount===check.count) && (check.rTotal==null || Math.abs(check.rTotal-check.total)<0.05) && !check.itemsMissing;
+    state={source:'pdf', journal:res.meta.journal||'—', date:res.meta.date||'', driver:res.meta.driver||'נהג', check:check,
+      stops:res.stops, phase:'morning', view:'route', start:state.start||'ofakim', counts:state.counts, memory:state.memory};
+    photos={};
+    save(); render(); window.scrollTo(0,0);
+    toast(check.ok ? 'היומן נקרא: '+check.count+' הזמנות' : 'היומן נקרא, אבל יש אי־התאמה — בדוק למטה');
+  }catch(e){
+    render();
+    toast('לא הצלחתי לקרוא. צריך את ״דוח הזמנות לפי יומן״ (BB-454) כ־PDF.');
+    try{ console.error(e); }catch(_){}
+  }
+}
+
+/* ================= walking order on a map =================
+   Only the address (street, house, town) goes to OpenStreetMap — never a name or a phone.
+   Every result is cached on the phone, and a parking spot saved by GPS always wins over the address. */
+var GEOKEY='gazgal-geo-v1', geo={}, lastGeoCall=0;
+try{ geo=JSON.parse(localStorage.getItem(GEOKEY)||'{}')||{}; }catch(e){ geo={}; }
+function saveGeo(){ try{ localStorage.setItem(GEOKEY, JSON.stringify(geo)); }catch(e){} }
+var START_Q = {ofakim:'נחושתן 5, אופקים', hovav:'רמת חובב'};
+var START_FALLBACK = {ofakim:[31.3140,34.6203], hovav:[31.1390,34.7700]};
+function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+async function geocode(q){
+  if(Object.prototype.hasOwnProperty.call(geo,q)) return geo[q];
+  var wait=1100-(Date.now()-lastGeoCall); if(wait>0) await sleep(wait);
+  lastGeoCall=Date.now();
+  var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he&q='+encodeURIComponent(q));
+  if(!r.ok) throw new Error('geo '+r.status);
+  var j=await r.json(), p=(j && j[0]) ? [parseFloat(j[0].lat), parseFloat(j[0].lon)] : null;
+  geo[q]=p; saveGeo(); return p;
+}
+async function locate(s){
+  var m=state.memory[s.cust]; if(m && m.lat) return {p:[m.lat,m.lon], how:'חנייה שמורה'};
+  var city=s.city||'', p=null;
+  if(s.street){ p=await geocode((s.street+' '+(s.house||'')).trim()+', '+city); if(p) return {p:p, how:'כתובת'}; }
+  if(s.street && s.house){ p=await geocode(s.street+', '+city); if(p) return {p:p, how:'רחוב'}; }
+  if(city){ p=await geocode(city); if(p) return {p:p, how:'יישוב'}; }
+  return {p:null, how:'לא נמצא'};
+}
+function dist(a,b){
+  var rad=Math.PI/180, dLa=(b[0]-a[0])*rad, dLo=(b[1]-a[1])*rad;
+  var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a[0]*rad)*Math.cos(b[0]*rad)*Math.sin(dLo/2)*Math.sin(dLo/2);
+  return 12742*Math.asin(Math.sqrt(h));
+}
+function optimize(start,pts){
+  function len(pp){ var t=0, c=start; pp.forEach(function(x){ t+=dist(c,x.p); c=x.p; }); return t; }
+  var left=pts.slice(), path=[], c=start;
+  while(left.length){ var bi=0, bd=Infinity; left.forEach(function(x,i){ var d=dist(c,x.p); if(d<bd){ bd=d; bi=i; } }); var nx=left.splice(bi,1)[0]; path.push(nx); c=nx.p; }
+  var better=true, guard=0;
+  while(better && guard++<60){ better=false;
+    for(var i=0;i<path.length-1;i++) for(var k=i+1;k<path.length;k++){
+      var np=path.slice(0,i).concat(path.slice(i,k+1).reverse(), path.slice(k+1));
+      if(len(np)+1e-9<len(path)){ path=np; better=true; } } }
+  return {path:path, km:len(path)};
+}
+function here(){ return new Promise(function(res,rej){ if(!navigator.geolocation) return rej(new Error('no geo'));
+  navigator.geolocation.getCurrentPosition(function(p){ res(p); }, rej, {enableHighAccuracy:true, timeout:12000, maximumAge:30000}); }); }
+async function startPoint(fromHere){
+  if(fromHere || state.start==='here'){
+    try{ var pos=await here(); return [pos.coords.latitude, pos.coords.longitude]; }catch(e){ toast('אין הרשאת מיקום — מתחיל ממחסן אופקים'); }
+  }
+  var k = state.start==='hovav' ? 'hovav' : 'ofakim';
+  try{ var p=await geocode(START_Q[k]); if(p) return p; }catch(e){}
+  return START_FALLBACK[k];
+}
+function wake(){ try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').catch(function(){}); }catch(e){} }
+async function autoRoute(fromHere){
+  var app=document.getElementById('app'), ps=pending(), located=[], missing=[];
+  function prog(i){ app.innerHTML=topbar()+'<main><div class="loading"><div class="spin"></div>ממקם כתובות במפה… '+i+' / '+ps.length+
+    '<span class="hint center">כתובת חדשה לוקחת כשנייה. כתובת שכבר נמצאה פעם נשמרת בטלפון.</span></div></main>'; }
+  prog(0);
+  try{
+    var start=await startPoint(fromHere);
+    for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
+    var r=optimize(start, located);
+    state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing);
+    state.phase='route'; state.view='route'; save(); render(); window.scrollTo(0,0); wake();
+    toast('סודר לפי מפה · כ־'+Math.round(r.km)+' ק״מ בקו אווירי'+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
+  }catch(e){
+    startRoute(false);
+    toast('אין גישה למפה — סודר לפי יישוב. אפשר לסדר ידנית עם ✋.');
+  }
+}
+
+/* ================= pieces ================= */
+function firstName(){ return (state.driver||'').split(' ')[0] || ''; }
+function topbar(){
+  var d=done().length, n=state.stops.length, t=cashTotals();
+  return (state.source==='sample' ? '<div class="demo">יומן לדוגמה · הנתונים מומצאים. ייבא את היומן שלך מבש״ן כדי להתחיל.</div>' : '')+
+  '<header class="topbar"><div class="row"><span class="j">יומן '+esc(state.journal)+(state.date?' · '+esc(state.date):'')+' · '+esc(state.driver)+'</span>'+
+  '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
+  '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></div>'+
+  '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div></header>';
+}
+function stepper(key,val,label,sub){
+  return '<div class="step"><div class="l">'+label+(sub?'<small>'+sub+'</small>':'')+'</div><div class="stp">'+
+  '<button type="button" data-step="'+key+'" data-d="-1" aria-label="פחות">−</button><output class="num" id="o-'+key+'">'+val+'</output>'+
+  '<button type="button" data-step="'+key+'" data-d="1" aria-label="יותר">+</button></div></div>';
+}
+function badge(s){
+  var md=mode(s), amt=money(totalOf(s,false));
+  if(md==='collect') return '<div class="collect c-collect"><span>לגבות</span><span class="big num">'+amt+'</span></div>';
+  if(md==='verify') return '<div class="collect c-verify"><span>לגבות?<small>'+(s.paidFlag?'':/שולם/.test(s.note||'')?'בהערה כתוב ״שולם״ — לוודא עם הלקוח':'לא מסומן כשולם — לוודא')+'</small></span><span class="big num">'+amt+'</span></div>';
+  if(md==='paid') return '<div class="collect c-paid"><span>שולם מראש</span><span>לא גובים</span></div>';
+  if(md==='standing') return '<div class="collect c-credit"><span>הוראת קבע</span><span>לא גובים</span></div>';
+  return '<div class="collect c-credit"><span>לקוח אשראי</span><span>לא גובים</span></div>';
+}
+function listTag(s){
+  var md=mode(s), a=money(totalOf(s,false));
+  return (md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
+    (s.hot?' <span class="tag t-acc">חמה</span>':'')+(s.cityGuess?' <span class="tag t-warn">יישוב משוער</span>':'')+
+    ((s.geoHow==='רחוב'||s.geoHow==='יישוב')?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
+}
+function pills(s){ return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
+
+/* ================= screens ================= */
+function viewMorning(){
+  var q={'1':0,'2':0}, other=0, col=0, ver=0, warn=[];
+  state.stops.forEach(function(s){
+    s.items.forEach(function(i){ if(q[i.code]!=null) q[i.code]+=i.qty; else other+=i.qty; });
+    if(mode(s)==='collect') col+=totalOf(s,false);
+    if(mode(s)==='verify'){ ver++; }
+    if(s.cityGuess || /פיקטיבית/.test(s.note||'') || mode(s)==='verify') warn.push(s);
+  });
+  var ck=state.check;
+  return '<main>'+
+  '<div class="hero"><span class="eyebrow">בוקר</span><h1>בוקר טוב'+(firstName()?', '+esc(firstName()):'')+'</h1></div>'+
+  '<section class="card"><div class="sec" style="margin:0"><h3>יומן '+esc(state.journal)+'</h3>'+(state.source==='pdf'?'<span class="tag t-ok">מבש״ן</span>':'<span class="tag t-warn">לדוגמה</span>')+'</div>'+
+  (ck ? (ck.ok ? '<div class="okbox">✓ נקראו '+ck.count+' הזמנות · '+money(ck.total)+' — תואם לסיכום בתחתית הדוח</div>'
+              : '<div class="note">⚠ נקראו '+ck.count+' הזמנות · '+money(ck.total)+(ck.rCount!=null?' · בדוח: '+ck.rCount+' הזמנות · '+money(ck.rTotal):'')+(ck.itemsMissing?' · '+ck.itemsMissing+' הזמנות בלי פריט':'')+'. בדוק מול הדף המודפס.</div>') : '')+
+  '<div class="grid2"><div class="kpi"><span class="v num">'+state.stops.length+'</span><span class="k">עצירות</span></div>'+
+  '<div class="kpi"><span class="v num">'+money(col)+'</span><span class="k">לגבות בשטח'+(ver?' + '+ver+' לוודא':'')+'</span></div>'+
+  '<div class="kpi"><span class="v num">'+q['1']+'</span><span class="k">בלונים 12 ק״ג</span></div>'+
+  '<div class="kpi"><span class="v num">'+q['2']+'</span><span class="k">בלונים 48 ק״ג'+(other?' · +'+other+' אחר':'')+'</span></div></div>'+
+  '<label class="filebtn big">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>'+
+  '<p class="hint">בוחרים את ה־PDF של ״דוח הזמנות לפי יומן״. הקובץ נקרא בטלפון ולא נשלח לשום מקום.</p>'+
+  (pdfReady===true ? '<p class="hint" style="color:var(--ok);font-weight:800">✓ קורא ה־PDF מוכן</p>'
+   : pdfReady===false ? '<p class="err">⚠ קורא ה־PDF לא נטען. צריך קליטה — רענן את הדף ונסה שוב.</p>'
+   : '<p class="hint">בודק את קורא ה־PDF…</p>')+'</section>'+
+  (warn.length?'<section class="card"><div class="sec" style="margin:0"><h3>לבדוק לפני יציאה</h3><span class="tag t-warn num">'+warn.length+'</span></div><div class="list">'+
+    warn.map(function(s){ var why=[]; if(mode(s)==='verify') why.push(/שולם/.test(s.note||'')?'״שולם״ בהערה':'לא מסומן כשולם'); if(s.cityGuess) why.push('אין יישוב ביומן — הונח '+s.city); if(/פיקטיבית/.test(s.note||'')) why.push('הזמנה פיקטיבית');
+      return '<div class="li" style="box-shadow:none;background:var(--surface-2)"><span class="n num">'+s.row+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(why.join(' · '))+'</div></div><span></span></div>'; }).join('')+
+  '</div></section>':'')+
+  '<section class="card"><div class="sec" style="margin:0"><h3>ספירת מלאי</h3><span class="muted num">'+state.counts.length+' היום</span></div>'+
+  '<button class="btn btn-ghost btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button>'+countsList()+'</section>'+
+  '<section class="card"><h3>מאיפה יוצאים?</h3><div class="chips" role="group" aria-label="נקודת מוצא">'+
+  ['ofakim','hovav','here'].map(function(k){ return '<button type="button" class="chip" data-start="'+k+'" aria-pressed="'+(state.start===k)+'">'+START_LABEL[k]+'</button>'; }).join('')+
+  '</div></section>'+
+  '<button class="btn btn-accent" id="goAuto" type="button">🧭 סדר הליכה אוטומטי</button>'+
+  '<div class="grid2"><button class="btn btn-ghost btn-sm" id="goManual" type="button">✋ אני אסדר</button><button class="btn btn-ghost btn-sm" id="goRoute" type="button">לפי יישוב</button></div>'+
+  '<p class="hint center">הסידור האוטומטי שולח למפה (OpenStreetMap) רק כתובות — בלי שמות וטלפונים.</p>'+
+  '</main>';
+}
+function viewRoute(){
+  var c=cur(), p=pending(), d=done(), out='<main>';
+  if(!c){
+    out+='<section class="card center"><span class="eyebrow">הסבב הושלם</span><h2 style="font-family:var(--display);font-weight:400;font-size:26px">כל העצירות טופלו</h2>'+
+    '<p class="muted" style="margin:0">עבור ל״סוף יום״ לספירה ולדוח הסגירה.</p><button class="btn btn-accent" type="button" data-view="end">לסוף יום</button></section>';
+  } else {
+    var mem=state.memory[c.cust]||{}, mp=memPhotos[c.cust], cts=contacts(c), mob=cts.filter(function(x){ return /^05/.test(x.num); })[0];
+    out+='<section class="card next" aria-label="העצירה הבאה">'+
+      '<span class="eyebrow">העצירה הבאה · '+(d.length+1)+' מתוך '+state.stops.length+(c.hot?' · הזמנה חמה':'')+(c.id && !c.hot?' · הזמנה '+esc(c.id):'')+'</span>'+
+      '<div class="name">'+esc(c.name)+'</div>'+
+      '<div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+(c.cityGuess?' ?':'')+'</span></div>'+
+      badge(c)+pills(c)+
+      (c.note?'<div class="note">📝 '+esc(c.note)+'</div>':'')+
+      ((mem.parking||mp||mem.lat)?'<div class="mem"><b>📍 מהפעם הקודמת</b>'+(mem.lat?'<span>מיקום חנייה שמור — Waze ינווט אליו</span>':'')+(mem.parking?'<span>'+esc(mem.parking)+'</span>':'')+(mp?'<img src="'+mp+'" alt="עמדת הבלונים של הלקוח">':'')+'</div>':'')+
+      '<div class="acts">'+
+        '<a class="act waze" href="'+(mem.lat ? 'https://waze.com/ul?ll='+mem.lat+','+mem.lon+'&navigate=yes' : 'https://waze.com/ul?q='+encodeURIComponent(navQ(c))+'&navigate=yes')+'" target="_blank" rel="noopener"><b>🧭</b>Waze'+(mem.lat?' · חנייה':'')+'</a>'+
+        '<button class="act" type="button" data-sheet="call"><b>📞</b>חיוג</button>'+
+        (mob?'<a class="act" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
+      '</div>'+
+      '<div class="go"><button class="btn btn-ok" type="button" data-sheet="deliver">✓ סופק</button><button class="btn btn-bad" type="button" data-sheet="fail">✕ לא סופק</button></div>'+
+    '</section>';
+  }
+  if(p.length>1){
+    out+='<section><div class="sec"><h3>הבאים בתור · <span class="muted num">'+(p.length-1)+'</span></h3><span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" id="reAuto">🧭 מכאן</button><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" data-sheet="order">✋ ידני</button></span></div><div class="list">'+
+    p.slice(1).map(function(s,i){
+      return '<div class="li"><span class="n num">'+(d.length+i+2)+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div><div style="margin-top:4px">'+listTag(s)+'</div></div>'+
+      '<div class="ctl"><button class="ic" type="button" data-mv="'+s.id+'" data-d="-1" aria-label="הקדם את '+esc(s.name)+'">▲</button><button class="ic" type="button" data-mv="'+s.id+'" data-d="1" aria-label="דחה את '+esc(s.name)+'">▼</button><button class="ic" type="button" data-first="'+s.id+'" aria-label="עבור עכשיו ל'+esc(s.name)+'">⤒</button></div></div>';
+    }).join('')+'</div></section>';
+  }
+  if(d.length){
+    out+='<section><div class="sec"><h3>הושלמו · <span class="muted num">'+d.length+'</span></h3></div><div class="list">'+
+    d.slice().reverse().map(function(s){ var r=s.result||{}, py=r.payment;
+      var tg = s.status==='delivered'
+        ? '<span class="tag t-ok">סופק'+(py && py.method!=='none' ? ' · '+esc(PAY[py.method])+' '+money(py.amount) : '')+'</span>'
+        : '<span class="tag t-bad">לא סופק · '+esc(r.reason||'')+'</span>';
+      return '<div class="li done-li"><span class="n">'+(s.status==='delivered'?'✓':'✕')+'</span><div><div class="t">'+esc(s.name)+'</div><div style="margin-top:4px">'+tg+'</div></div><div class="ctl"><button class="ic" type="button" data-reopen="'+s.id+'" aria-label="פתח מחדש את '+esc(s.name)+'">↺</button></div></div>';
+    }).join('')+'</div></section>';
+  }
+  return out+'</main>';
+}
+function viewStock(){
+  return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+
+  '<button class="btn btn-accent" type="button" data-sheet="count">+ ספירה חדשה</button>'+countsList()+'</main>';
+}
+function viewCash(){
+  var t=cashTotals(), rows=done().filter(function(s){ return s.result && s.result.payment && s.result.payment.method!=='none'; });
+  return '<main><div class="hero"><span class="eyebrow">קופת נהג</span><h1 class="num">'+money(t.cash+t.cheque)+'</h1><span class="muted">מזומן וצ׳קים למסירה במשרד</span></div>'+
+  '<div class="grid2"><div class="kpi"><span class="v num">'+money(t.cash)+'</span><span class="k">מזומן · '+t.nc+'</span></div><div class="kpi"><span class="v num">'+money(t.cheque)+'</span><span class="k">צ׳קים · '+t.nq+'</span></div>'+
+  '<div class="kpi"><span class="v num">'+money(t.office)+'</span><span class="k">אשראי דרך המשרד</span></div><div class="kpi"><span class="v num" style="color:var(--bad)">'+money(t.unpaid)+'</span><span class="k">סופק ולא שולם</span></div></div>'+
+  (rows.length?'<section class="card"><h3>לפי עצירה</h3><div class="tbl"><table><thead><tr><th>לקוח</th><th>אמצעי</th><th class="v">סכום</th></tr></thead><tbody>'+
+   rows.map(function(s){ var py=s.result.payment, ph=photos['q-'+s.id]; return '<tr><td>'+esc(s.name)+(ph?' <img src="'+ph+'" alt="צ׳ק" style="width:34px;height:34px;object-fit:cover;border-radius:6px;vertical-align:middle">':'')+'</td><td>'+esc(payDetail(s))+'</td><td class="v num">'+money(py.amount)+'</td></tr>'; }).join('')+
+   '</tbody></table></div></section>':'<p class="muted center">עוד לא נגבה כסף בסבב הזה.</p>')+
+  '</main>';
+}
+function report(){
+  var del=state.stops.filter(function(s){ return s.status==='delivered'; }), fail=state.stops.filter(function(s){ return s.status==='failed'; });
+  var by={collect:{q1:0,q2:0,sum:0,n:0}, paid:{q1:0,q2:0,sum:0,n:0}, credit:{q1:0,q2:0,sum:0,n:0}};
+  var q={1:0,2:0}, e={1:0,2:0};
+  del.forEach(function(s){ var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)]; b.n++;
+    s.items.forEach(function(i){ if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=(i.actual||0); q[i.code]+=(i.actual||0); } }); b.sum+=totalOf(s,true);
+    e[1]+=s.result.empties[1]||0; e[2]+=s.result.empties[2]||0; });
+  var base=lastCount('me','יציאה'), eve=lastCount('me','סוף יום');
+  var exp = base ? {gm:(base.v.gm||0)-q[2], km:(base.v.km||0)-q[1], gr:(base.v.gr||0)+e[2], kr:(base.v.kr||0)+e[1]} : null;
+  return { del:del, fail:fail, by:by, q:q, e:e, t:cashTotals(), base:base, eve:eve, exp:exp,
+    LBL:{collect:'באספקה (נגבה בשטח)', paid:'שולם מראש', credit:'אשראי / הוראת קבע'},
+    hot:state.stops.filter(function(s){ return s.hot; }), open:pending() };
+}
+function reportText(R){
+  var L=[];
+  L.push('דוח סגירה — יומן '+state.journal+(state.date?' · '+state.date:''));
+  L.push('נהג: '+state.driver);
+  L.push('');
+  L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]);
+  Object.keys(R.by).forEach(function(k){ var b=R.by[k]; if(b.n) L.push('• '+R.LBL[k]+': '+b.n+' עצירות · 12: '+b.q1+' · 48: '+b.q2+' · '+money(b.sum)); });
+  L.push('');
+  L.push('קופה למסירה: '+money(R.t.cash+R.t.cheque)+' (מזומן '+money(R.t.cash)+' · צ׳קים '+money(R.t.cheque)+' ב־'+R.t.nq+' צ׳קים)');
+  R.del.filter(function(s){ return s.result.payment.method==='cheque'; }).forEach(function(s){ L.push('  • צ׳ק — '+s.name+' · '+money(s.result.payment.amount)+' · '+payDetail(s).replace(/^צ׳ק ?/,'')); });
+  if(R.t.office) L.push('אשראי דרך המשרד: '+money(R.t.office));
+  if(R.t.prepaid) L.push('לפי הנהג שולם מראש: '+money(R.t.prepaid)+' — '+R.del.filter(function(s){ return s.result.payment.method==='prepaid'; }).map(function(s){ return s.name; }).join(', '));
+  if(R.t.unpaid) L.push('⚠ סופק ולא שולם: '+money(R.t.unpaid)+' — '+R.del.filter(function(s){ return s.result.payment.method==='unpaid'; }).map(function(s){ return s.name; }).join(', '));
+  if(R.fail.length){ L.push(''); L.push('לא סופקו:'); R.fail.forEach(function(s){ L.push('• '+s.name+' — '+s.result.reason+(s.result.text?' ('+s.result.text+')':'')); }); }
+  if(R.open.length){ L.push(''); L.push('לא טופלו: '+R.open.map(function(s){ return s.name; }).join(', ')); }
+  if(R.hot.length){ L.push(''); L.push('הזמנות חמות שנוספו: '+R.hot.map(function(s){ return s.name+' ('+addr(s)+', '+s.city+')'; }).join(' · ')); }
+  if(R.exp && R.eve){ L.push(''); L.push('מלאי משאית — צפוי / נספר בסוף יום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]+'/'+(R.eve.v[f.k]||0); }).join(' · ')); }
+  if(state.counts.length){ L.push(''); L.push('ספירות היום: '+state.counts.map(function(c){ return pointName(c)+' '+c.moment+' ('+c.time+')'; }).join(' · ')); }
+  return L.join('\n');
+}
+function cmp(exp,got){ return exp===got ? '<span class="match num">'+got+' ✓</span>' : '<span class="mismatch num">'+got+' (צפוי '+exp+')</span>'; }
+function viewEnd(){
+  var R=report();
+  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>סגירת יומן '+esc(state.journal)+'</h1></div>'+
+  (R.open.length?'<div class="note">נשארו '+R.open.length+' עצירות פתוחות. אפשר לסגור בכל זאת, והן יופיעו בדוח כ״לא טופלו״.</div>':'')+
+  '<section class="card"><div class="sec" style="margin:0"><h3>ספירת סוף יום — המשאית</h3>'+(R.eve?'<span class="tag t-ok num">'+esc(R.eve.time)+'</span>':'')+'</div>'+
+  (R.eve?'<div class="msg">'+esc(countLines(R.eve).join('\n'))+'</div>':'<p class="hint">עוד לא נספר.</p>')+
+  '<button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|סוף יום">'+(R.eve?'ספור שוב':'ספור עכשיו')+'</button></section>'+
+  '<section class="card report"><div class="sec" style="margin:0"><h3>דוח סגירה למשרד</h3><span class="tag t-ok num">'+R.del.length+'/'+state.stops.length+' סופקו</span></div>'+
+  '<div class="tbl"><table><thead><tr><th>סוג</th><th class="v">עצירות</th><th class="v">12</th><th class="v">48</th><th class="v">סכום</th></tr></thead><tbody>'+
+  Object.keys(R.by).map(function(k){ var b=R.by[k]; return '<tr><td>'+R.LBL[k]+'</td><td class="v num">'+b.n+'</td><td class="v num">'+b.q1+'</td><td class="v num">'+b.q2+'</td><td class="v num">'+money(b.sum)+'</td></tr>'; }).join('')+
+  '<tr><th>סה״כ</th><th class="v num">'+R.del.length+'</th><th class="v num">'+R.q[1]+'</th><th class="v num">'+R.q[2]+'</th><th class="v"></th></tr></tbody></table></div>'+
+  '<div class="sum"><span>קופה למסירה</span><span class="big num">'+money(R.t.cash+R.t.cheque)+'</span></div>'+
+  '<div class="muted">מזומן '+money(R.t.cash)+' · צ׳קים '+money(R.t.cheque)+' ('+R.t.nq+')'+(R.t.office?' · אשראי דרך המשרד '+money(R.t.office):'')+(R.t.prepaid?' · שולם מראש לפי הנהג '+money(R.t.prepaid):'')+'</div>'+
+  (R.t.unpaid?'<div class="note">⚠ סופק ולא שולם: '+money(R.t.unpaid)+'</div>':'')+
+  (R.fail.length?'<div><b>לא סופקו</b><ul style="margin:6px 0 0;padding-inline-start:18px">'+R.fail.map(function(s){ return '<li>'+esc(s.name)+' — '+esc(s.result.reason)+(s.result.text?' ('+esc(s.result.text)+')':'')+'</li>'; }).join('')+'</ul></div>':'')+
+  (R.hot.length?'<div><b>הזמנות חמות:</b> '+R.hot.map(function(s){ return esc(s.name); }).join(', ')+'</div>':'')+
+  '<div><b>התאמת מלאי — המשאית</b>'+
+  (R.exp && R.eve
+    ? '<div class="tbl"><table><tbody>'+CF.map(function(f){ return '<tr><td>'+f.d+' ('+f.l+')</td><td class="v">'+cmp(R.exp[f.k], R.eve.v[f.k]||0)+'</td></tr>'; }).join('')+'</tbody></table></div>'+
+      '<p class="hint">צפוי = ספירת ה״יציאה״ של הבוקר, פחות מלאים שסופקו, ועוד ריקים שנאספו.</p>'
+    : '<p class="hint">'+(!R.base?'חסרה ספירת ״יציאה״ של המשאית מהבוקר, אז אין ממה לחשב.':'חסרה ספירת סוף יום של המשאית.')+'</p>')+
+  '</div>'+
+  '<button class="btn btn-accent btn-sm" type="button" id="copyRep">העתק את הדוח לוואטסאפ</button>'+
+  '<a class="btn btn-ghost btn-sm linkbtn" id="waRep" href="https://wa.me/?text='+encodeURIComponent(reportText(R))+'" target="_blank" rel="noopener">שלח בוואטסאפ</a>'+
+  '<textarea class="inp" id="repText" readonly hidden aria-label="טקסט הדוח"></textarea>'+
+  '</section>'+
+  '<button class="btn btn-ghost btn-sm" type="button" data-sheet="reset">התחל יום חדש</button>'+
+  '</main>';
+}
+function navbar(){
+  var v = state.view==='stock' ? 'stock' : (state.phase==='morning' ? 'route' : state.view);
+  function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
+  return (state.phase==='route' && v==='route' && cur() ? '<button class="fab" type="button" data-sheet="hot">+ הזמנה חמה</button>' : '')+
+  '<nav class="nav" aria-label="ניווט"><div class="in">'+tab('route','🚚','סבב')+tab('stock','📦','מלאי')+tab('cash','💵','קופה')+tab('end','📋','סוף יום')+'</div></nav>';
+}
+function render(){
+  var v=state.view;
+  var body = v==='stock' ? viewStock() : state.phase==='morning' ? viewMorning() : v==='cash' ? viewCash() : v==='end' ? viewEnd() : viewRoute();
+  document.getElementById('app').innerHTML = topbar()+body+navbar();
+}
+
+/* ================= sheets ================= */
+function ordered(s,code){ return s.items.filter(function(i){ return i.code===code; }).reduce(function(t,i){ return t+i.qty; },0); }
+function codesOf(c){ var cs=['1','2']; c.items.forEach(function(i){ if(cs.indexOf(i.code)<0) cs.push(i.code); }); return cs; }
+function labelFor(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; return ex ? itemLabel(ex) : (KG[code]+' ק״ג'); }
+function dItems(c){
+  var out=[];
+  codesOf(c).forEach(function(code){ var ex=c.items.filter(function(i){ return i.code===code; })[0];
+    var qty=ex?ex.qty:0; if(qty || draft.q[code]) out.push({code:code, desc:ex?ex.desc:('מיכל '+KG[code]+' ק"ג'), qty:qty, price:ex?ex.price:PRICE[code], actual:draft.q[code]||0}); });
+  return out;
+}
+function dAmount(c){ return totalOf({items:dItems(c), discGross:c.discGross}, true); }
+function openSheet(kind,preset){
+  var c=cur(), html='';
+  if(kind==='count'){
+    var pr=(preset||'').split('|'), pt=pr[0]||'me', mo=pr[1]||nextMoment(pt);
+    draft={point:pt, pointText:'', moment:mo, v:{}};
+    html='<h2>ספירת מלאי</h2>'+
+    '<div class="field"><span class="lbl">איפה סופרים</span><div class="chips" role="group" aria-label="נקודת ספירה">'+
+      ['me','eyal','ramp','other'].map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+POINT_BTN[k]+'</button>'; }).join('')+'</div>'+
+      '<input class="inp" id="cOther" placeholder="שם הנקודה" autocomplete="off" hidden></div>'+
+    '<div class="field"><span class="lbl">מתי</span><div class="chips" role="group" aria-label="מתי">'+
+      MOMENTS.map(function(m){ return '<button type="button" class="chip" data-cmom="'+m+'" aria-pressed="'+(m===mo)+'">'+m+'</button>'; }).join('')+'</div></div>'+
+    '<div class="cgrid"><span></span><span class="h">גדול · 48</span><span class="h">קטן · 12</span>'+
+      '<span class="r">מלא</span>'+cin('gm','גדול מלא')+cin('km','קטן מלא')+
+      '<span class="r">ריק</span>'+cin('gr','גדול ריק')+cin('kr','קטן ריק')+'</div>'+
+    '<details class="amg"><summary>אמגזיות — 5 ו־2.5 ק״ג</summary><div class="cgrid"><span></span><span class="h">מלא</span><span class="h">ריק</span>'+
+      '<span class="r">5 ק״ג</span>'+cin('a5m','אמגזית 5 מלא')+cin('a5r','אמגזית 5 ריק')+
+      '<span class="r">2.5 ק״ג</span>'+cin('a25m','אמגזית 2.5 מלא')+cin('a25r','אמגזית 2.5 ריק')+'</div></details>'+
+    '<p class="hint">שדה ריק = 0, ולא נכנס להודעה.</p>'+
+    '<div class="field"><span class="lbl">ההודעה לקבוצה</span><div class="msg" id="cMsg"></div></div>'+
+    '<p class="err" id="cErr" hidden></p>'+
+    '<button class="btn btn-accent" type="button" id="saveCount">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='order'){
+    draft={seq:[]};
+    html='<h2>סדר המסלול</h2><p class="hint">לחץ על העצירות לפי הסדר שבו תיסע. לחיצה נוספת מבטלת. מה שלא תסמן יישאר בסוף, באותו סדר.</p><div class="list">'+
+    pending().map(function(s){ return '<button type="button" class="li" data-ord="'+s.id+'"><span class="n num" id="ordn-'+s.id+'">·</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div></div><span>'+listTag(s)+'</span></button>'; }).join('')+
+    '</div><button class="btn btn-accent" type="button" id="applyOrder">החל את הסדר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='call'){
+    html='<h2>חיוג — '+esc(c.name)+'</h2><div class="list">'+contacts(c).map(function(x){
+      return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+'</div>'+
+    '<p class="hint">אם החיוג לא נפתח בלחיצה, המספר מופיע כאן להקלדה.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  }
+  if(kind==='deliver'){
+    var md=mode(c), mem=state.memory[c.cust]||{}, codes=codesOf(c);
+    draft={q:{}, e:{}, method:null, cheque:null, stand:null};
+    codes.forEach(function(code){ draft.q[code]=ordered(c,code); });
+    draft.e[1]=draft.q['1']; draft.e[2]=draft.q['2'];
+    var payOpts = md==='verify' ? ['cash','cheque','office','prepaid','unpaid'] : ['cash','cheque','office','unpaid'];
+    html='<h2>סופק — '+esc(c.name)+'</h2>'+
+    '<div class="field"><span class="lbl">כמה סופק בפועל</span><div class="steps">'+
+      codes.map(function(code){ return stepper('q-'+code, draft.q[code], esc(labelFor(c,code)), 'בהזמנה: '+ordered(c,code)); }).join('')+'</div></div>'+
+    '<div class="field"><span class="lbl">ריקים שנאספו</span><div class="steps">'+stepper('e1',draft.e[1],'12 ק״ג')+stepper('e2',draft.e[2],'48 ק״ג')+'</div></div>'+
+    (collects(c)
+      ? '<div class="sum"><span>לגבות</span><span class="big num" id="dAmt">'+money(dAmount(c))+'</span></div>'+
+        (md==='verify'?'<div class="note">'+(/שולם/.test(c.note||'')?'בהערה כתוב ״שולם״. אם הלקוח כבר שילם — בחר ״שולם מראש״.':'ההזמנה לא מסומנת כשולמה. לוודא עם הלקוח.')+'</div>':'')+
+        '<div class="field"><span class="lbl">איך שולם?</span><div class="chips" role="group" aria-label="אמצעי תשלום">'+
+        payOpts.map(function(k){ return '<button type="button" class="chip" data-pay="'+k+'" aria-pressed="false">'+PAY[k]+'</button>'; }).join('')+'</div></div>'+
+        '<div id="chq" hidden class="field"><label for="chqAmt" class="lbl">סכום הצ׳ק</label><input class="inp num" id="chqAmt" inputmode="decimal" value="'+dAmount(c)+'">'+
+        '<div class="grid2"><div class="field"><label for="chqNo" class="lbl">מספר צ׳ק (לא חובה)</label><input class="inp num" id="chqNo" inputmode="numeric" autocomplete="off"></div>'+
+        '<div class="field"><label for="chqDue" class="lbl">לפירעון (לא חובה)</label><input class="inp num" id="chqDue" type="date"></div></div>'+
+        '<div class="photo"><label class="filebtn">📷 צילום הצ׳ק (לא חובה)<input type="file" id="chqIn" accept="image/*"></label><span id="chqPrev"></span></div>'+
+        '<p class="hint">צילום עוזר לפקידה ומגן כשצ׳ק חוזר, אבל אפשר לאשר גם בלעדיו.</p></div>'
+      : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
+    '<div class="field"><span class="lbl">📍 מיקום חנייה</span><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(mem.lat?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
+      '<p class="hint" id="gpsMsg">'+(mem.lat?'יש מיקום שמור מהפעם הקודמת.':'עומד בחנייה הנכונה? שמור, ובפעם הבאה Waze והסידור ישתמשו בו.')+'</p></div>'+
+    '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(mem.parking||'')+'</textarea></div>'+
+    '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span><div class="photo"><label class="filebtn">📷 צלם את העמדה<input type="file" id="standIn" accept="image/*"></label><span id="standPrev"></span></div></div>'+
+    '<p class="err" id="dErr" hidden></p>'+
+    '<button class="btn btn-ok" type="button" id="confirmDeliver">אישור אספקה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='fail'){
+    draft={reason:null};
+    html='<h2>לא סופק — '+esc(c.name)+'</h2><div class="field"><span class="lbl">למה?</span><div class="chips" role="group" aria-label="סיבה">'+
+    REASONS.map(function(r){ return '<button type="button" class="chip" data-reason="'+r+'" aria-pressed="false">'+r+'</button>'; }).join('')+'</div></div>'+
+    '<div class="field"><label for="failTxt">פירוט</label><textarea class="inp" id="failTxt" placeholder="חובה רק ב״אחר״"></textarea></div>'+
+    '<p class="hint">ההזמנה חוזרת למשרד עם הסיבה. היא לא נמחקת.</p><p class="err" id="fErr" hidden></p>'+
+    '<button class="btn btn-bad" type="button" id="confirmFail">סמן כלא סופק</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='hot'){
+    draft={q:{'1':0,'2':1}, pay:'collect', pos:'next'};
+    html='<h2>הזמנה חמה</h2><p class="hint">הזמנה שנכנסה תוך כדי סבב. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
+    '<div class="field"><label for="hName">שם</label><input class="inp" id="hName" autocomplete="off"></div>'+
+    '<div class="field"><label for="hPhone">טלפון</label><input class="inp num" id="hPhone" inputmode="tel" autocomplete="off"></div>'+
+    '<div class="grid2"><div class="field"><label for="hStreet">רחוב</label><input class="inp" id="hStreet" autocomplete="off"></div><div class="field"><label for="hHouse">מספר</label><input class="inp num" id="hHouse" inputmode="numeric" autocomplete="off"></div></div>'+
+    '<div class="field"><label for="hCity">יישוב</label><input class="inp" id="hCity" autocomplete="off" value="'+esc(c?c.city:'')+'"></div>'+
+    '<div class="steps">'+stepper('h1',0,'12 ק״ג')+stepper('h2',1,'48 ק״ג')+'</div>'+
+    '<div class="sum"><span>סכום</span><span class="big num" id="hAmt">'+money(PRICE['2'])+'</span></div>'+
+    '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['collect','לגבות במקום'],['paid','שולם כבר'],['credit','לקוח אשראי']].map(function(x){ return '<button type="button" class="chip" data-hpay="'+x[0]+'" aria-pressed="'+(x[0]==='collect')+'">'+x[1]+'</button>'; }).join('')+'</div></div>'+
+    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='next')+'">'+x[1]+'</button>'; }).join('')+'</div></div>'+
+    '<p class="err" id="hErr" hidden></p>'+
+    '<button class="btn btn-accent" type="button" id="confirmHot">הוסף לסבב</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='reset'){
+    html='<h2>להתחיל יום חדש?</h2><p style="margin:0">הסימונים של היום והספירות יימחקו. הערות החנייה נשמרות. אחרי זה מייבאים את היומן של מחר.</p>'+
+    '<button class="btn btn-bad" type="button" id="confirmReset">כן, התחל יום חדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  document.getElementById('sheetRoot').innerHTML='<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>'+html+'</div></div>';
+  if(kind==='count') updateCountMsg();
+}
+function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; }
+function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; }
+function press(sel,t){ document.querySelectorAll(sel).forEach(function(b){ b.setAttribute('aria-pressed', b===t ? 'true' : 'false'); }); }
+function after(msg){ save(); closeSheet(); render(); window.scrollTo(0,0); if(msg) toast(msg); }
+
+/* ================= actions ================= */
+function startRoute(manual){
+  var order=CITY_ORDER[state.start], seen=[];
+  state.stops.forEach(function(s){ if(order.indexOf(s.city)<0 && seen.indexOf(s.city)<0) seen.push(s.city); });
+  var cities=order.concat(seen);
+  state.stops.sort(function(a,b){ var ca=cities.indexOf(a.city), cb=cities.indexOf(b.city); return ca!==cb ? ca-cb : (a.row||999)-(b.row||999); });
+  state.phase='route'; state.view='route';
+  save(); render(); window.scrollTo(0,0);
+  try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').catch(function(){}); }catch(e){}
+  if(manual) openSheet('order');
+  else toast('לפי יישוב: '+cities.filter(function(ci){ return state.stops.some(function(s){ return s.city===ci; }); }).join(' ← '));
+}
+function saveCount(){
+  var any=Object.keys(draft.v).some(function(k){ return draft.v[k]>0; });
+  if(!any){ showErr('cErr','לא הוזן אף מספר.'); return; }
+  if(draft.point==='other' && !draft.pointText){ showErr('cErr','כתוב את שם הנקודה.'); return; }
+  var c={id:'C'+Date.now(), point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v,
+    time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
+  state.counts.push(c); save(); render();
+  var msg=countMsg(c);
+  draft={savedMsg:msg};
+  document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשמר ✓</h2><div class="msg">'+esc(msg)+'</div>'+
+    '<a class="btn btn-ok linkbtn" href="https://wa.me/?text='+encodeURIComponent(msg)+'" target="_blank" rel="noopener">שלח לקבוצת הנהגים</a>'+
+    '<p class="hint">וואטסאפ ייפתח עם ההודעה מוכנה. בוחרים את ״נהגים גז גל״ ושולחים.</p>'+
+    '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" id="copyCount">העתק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="count">ספירה נוספת</button></div>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+}
+function confirmDeliver(){
+  var c=cur(), total=Object.keys(draft.q).reduce(function(t,k){ return t+(draft.q[k]||0); },0);
+  if(!total){ showErr('dErr','לא סומנה כמות. אם לא סופק כלום, סמן ״לא סופק״.'); return; }
+  var items=dItems(c), amount=dAmount(c), pay={method:'none', amount:0};
+  if(collects(c)){
+    if(!draft.method){ showErr('dErr','בחר איך שולם.'); return; }
+    if(draft.method==='cheque'){
+      var camt=parseFloat(String(document.getElementById('chqAmt').value||'').replace(',','.'))||0;
+      if(camt<=0){ showErr('dErr','כתוב את סכום הצ׳ק.'); return; }
+      pay={method:'cheque', amount:camt, no:(document.getElementById('chqNo').value||'').trim(), due:(document.getElementById('chqDue').value||'')};
+      if(draft.cheque) photos['q-'+c.id]=draft.cheque;
+    } else pay={method:draft.method, amount:amount};
+  }
+  c.items=items; c.status='delivered';
+  c.result={payment:pay, empties:{1:draft.e[1]||0, 2:draft.e[2]||0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
+  var park=(document.getElementById('park').value||'').trim();
+  state.memory[c.cust]=state.memory[c.cust]||{}; if(park) state.memory[c.cust].parking=park;
+  if(draft.geo){ state.memory[c.cust].lat=draft.geo[0]; state.memory[c.cust].lon=draft.geo[1]; }
+  if(draft.stand) memPhotos[c.cust]=draft.stand;
+  after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : ''));
+}
+function confirmFail(){
+  var c=cur(), txt=(document.getElementById('failTxt').value||'').trim();
+  if(!draft.reason){ showErr('fErr','בחר סיבה.'); return; }
+  if(draft.reason==='אחר' && !txt){ showErr('fErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
+  c.items.forEach(function(i){ i.actual=0; }); c.status='failed'; c.result={reason:draft.reason, text:txt, empties:{1:0,2:0}};
+  after('נרשם: '+draft.reason);
+}
+function confirmHot(){
+  var g=function(id){ return (document.getElementById(id).value||'').trim(); };
+  var name=g('hName'), street=g('hStreet'), city=g('hCity');
+  if(!name || !street || !city){ showErr('hErr','חסר שם, רחוב או יישוב.'); return; }
+  if(draft.q['1']+draft.q['2']===0){ showErr('hErr','בחר כמות.'); return; }
+  var items=[]; if(draft.q['1']) items.push(it('1',draft.q['1'])); if(draft.q['2']) items.push(it('2',draft.q['2']));
+  var s={id:'H'+String(Date.now()).slice(-6), row:999, cust:'hot-'+Date.now(), name:name, street:street, house:g('hHouse'), ent:'', apt:'', city:city,
+    type:(draft.pay==='credit'?'אשראי':'באספקה'), paidFlag:(draft.pay==='paid'), discGross:0, items:items, note:'', phones:[g('hPhone'),''],
+    status:'pending', result:null, hot:true};
+  var c=cur(), arr=state.stops;
+  if(draft.pos==='next' && c) arr.splice(arr.indexOf(c)+1,0,s); else arr.push(s);
+  after('נוספה לסבב: '+name);
+}
+
+/* ================= events ================= */
+document.addEventListener('click',function(ev){
+  var t=ev.target.closest('button,a,[data-scrim]'); if(!t) return;
+  if(t.hasAttribute('data-scrim')){ if(ev.target===t) closeSheet(); return; }
+  if(t.hasAttribute('data-close')){ closeSheet(); return; }
+  var ds=t.dataset;
+  if(ds.view){
+    if(state.phase==='morning' && ds.view!=='route' && ds.view!=='stock'){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
+    state.view=ds.view; save(); render(); window.scrollTo(0,0); return; }
+  if(ds.start){ state.start=ds.start; save(); render(); return; }
+  if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
+  if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); updateCountMsg(); return; }
+  if(ds.cmom){ draft.moment=ds.cmom; press('[data-cmom]',t); updateCountMsg(); return; }
+  if(ds.ord){
+    var ix=draft.seq.indexOf(ds.ord); if(ix>=0) draft.seq.splice(ix,1); else draft.seq.push(ds.ord);
+    document.querySelectorAll('[data-ord]').forEach(function(b){ var n=draft.seq.indexOf(b.dataset.ord); b.classList.toggle('sel', n>=0); document.getElementById('ordn-'+b.dataset.ord).textContent = n>=0 ? (n+1) : '·'; });
+    return; }
+  if(ds.delcount){
+    if(t.dataset.armed){ state.counts=state.counts.filter(function(x){ return x.id!==ds.delcount; }); save(); render(); toast('הספירה נמחקה'); }
+    else { t.dataset.armed='1'; t.textContent='לחץ שוב למחיקה'; t.style.color='var(--bad)'; t.style.borderColor='var(--bad)'; }
+    return; }
+  if(ds.step){
+    var k=ds.step, o=document.getElementById('o-'+k), v=Math.max(0,(parseInt(o.textContent,10)||0)+(+ds.d)); o.textContent=v;
+    if(k.indexOf('q-')===0){
+      var code=k.slice(2), prev=draft.q[code]; draft.q[code]=v;
+      if((code==='1'||code==='2') && draft.e[code]===prev){ draft.e[code]=v; var eo=document.getElementById('o-e'+code); if(eo) eo.textContent=v; }
+      var a=document.getElementById('dAmt'); if(a) a.textContent=money(dAmount(cur()));
+      var ca=document.getElementById('chqAmt'); if(ca) ca.value=dAmount(cur());
+    }
+    else if(k==='e1' || k==='e2'){ draft.e[k[1]]=v; }
+    else if(k==='h1' || k==='h2'){ draft.q[k[1]]=v; document.getElementById('hAmt').textContent=money(draft.q['1']*PRICE['1']+draft.q['2']*PRICE['2']); }
+    return;
+  }
+  if(ds.pay){ draft.method=ds.pay; press('[data-pay]',t); document.getElementById('chq').hidden=(draft.method!=='cheque'); return; }
+  if(ds.reason){ draft.reason=ds.reason; press('[data-reason]',t); return; }
+  if(ds.hpay){ draft.pay=ds.hpay; press('[data-hpay]',t); return; }
+  if(ds.hpos){ draft.pos=ds.hpos; press('[data-hpos]',t); return; }
+  if(ds.mv){
+    var ps=pending(), i=ps.findIndex(function(s){ return s.id===ds.mv; }), j=i+(+ds.d);
+    if(j<1 || j>=ps.length) return;
+    var arr=state.stops, ia=arr.indexOf(ps[i]), ib=arr.indexOf(ps[j]); arr[ia]=ps[j]; arr[ib]=ps[i];
+    save(); render(); return;
+  }
+  if(ds.first){
+    var s=state.stops.filter(function(x){ return x.id===ds.first; })[0], c=cur();
+    if(s && c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); }
+    return;
+  }
+  if(ds.reopen){
+    var r=state.stops.filter(function(x){ return x.id===ds.reopen; })[0];
+    if(r){ r.status='pending'; r.result=null; r.items=r.items.filter(function(i){ return i.qty>0; }); delete photos['q-'+r.id];
+      state.stops.splice(state.stops.indexOf(r),1); var c2=cur(); state.stops.splice(c2?state.stops.indexOf(c2):state.stops.length,0,r);
+      save(); render(); window.scrollTo(0,0); toast('נפתח מחדש: '+r.name); }
+    return;
+  }
+  if(t.id==='goAuto'){ autoRoute(false); return; }
+  if(t.id==='reAuto'){ autoRoute(true); return; }
+  if(t.id==='gpsPark'){
+    var gm=document.getElementById('gpsMsg'); gm.textContent='מאתר מיקום…';
+    here().then(function(pos){ if(!draft) return; draft.geo=[pos.coords.latitude, pos.coords.longitude];
+      gm.textContent='✓ נשמר (דיוק כ־'+Math.round(pos.coords.accuracy)+' מ׳). יישמר עם אישור האספקה.'; gm.style.color='var(--ok)'; })
+    .catch(function(){ gm.textContent='אין גישה למיקום. בדוק שהמיקום בטלפון דולק והרשה לדפדפן.'; gm.style.color='var(--bad)'; });
+    return; }
+  if(t.id==='goRoute'){ startRoute(false); return; }
+  if(t.id==='goManual'){ startRoute(true); return; }
+  if(t.id==='applyOrder'){
+    var chosen=draft.seq.map(function(id){ return state.stops.filter(function(x){ return x.id===id; })[0]; }).filter(Boolean);
+    var rest=pending().filter(function(x){ return chosen.indexOf(x)<0; });
+    state.stops=done().concat(chosen, rest);
+    after(chosen.length ? 'הסדר עודכן' : null); return;
+  }
+  if(t.id==='saveCount'){ saveCount(); return; }
+  if(t.id==='copyCount'){ var cm=draft && draft.savedMsg; if(!cm) return;
+    try{ navigator.clipboard.writeText(cm).then(function(){ toast('הועתק — הדבק בקבוצה'); }, function(){ toast('ההעתקה נחסמה. השתמש ב״שלח לקבוצת הנהגים״.'); }); }catch(e){ toast('ההעתקה נחסמה. השתמש ב״שלח לקבוצת הנהגים״.'); }
+    return; }
+  if(t.id==='confirmDeliver'){ confirmDeliver(); return; }
+  if(t.id==='confirmFail'){ confirmFail(); return; }
+  if(t.id==='confirmHot'){ confirmHot(); return; }
+  if(t.id==='confirmReset'){ var mem=state.memory; state=fresh(); state.memory=mem; photos={}; after('יום חדש. ייבא את היומן.'); return; }
+  if(t.id==='copyRep'){
+    var txt=reportText(report()), ta=document.getElementById('repText');
+    var fb=function(){ ta.hidden=false; ta.value=txt; ta.style.minHeight='220px'; ta.focus(); ta.select(); toast('סמן את הטקסט והעתק'); };
+    try{ navigator.clipboard.writeText(txt).then(function(){ toast('הדוח הועתק. הדבק אותו בוואטסאפ לפקידה.'); }, fb); }catch(e){ fb(); }
+    return;
+  }
+});
+document.addEventListener('input',function(ev){
+  var t=ev.target; if(!draft) return;
+  if(t.dataset && t.dataset.cin){
+    var clean=t.value.replace(/\D/g,'').slice(0,4); if(clean!==t.value) t.value=clean;
+    draft.v[t.dataset.cin]=clean ? parseInt(clean,10) : 0; t.classList.toggle('has', !!clean); updateCountMsg();
+  }
+  if(t.id==='cOther'){ draft.pointText=t.value.trim(); updateCountMsg(); }
+});
+document.addEventListener('keydown',function(ev){
+  var t=ev.target; if(ev.key!=='Enter' || !t.dataset || !t.dataset.cin) return;
+  ev.preventDefault();
+  var all=[].slice.call(document.querySelectorAll('[data-cin]')), nx=all[all.indexOf(t)+1];
+  var closed = nx && nx.closest('details') && !nx.closest('details').open;
+  if(nx && !closed) nx.focus(); else t.blur();
+});
+document.addEventListener('change',function(ev){
+  var t=ev.target;
+  if(t.id==='imp'){ var f=t.files && t.files[0]; t.value=''; if(f) importPdf(f); }
+  if(t.id==='chqIn'){ readPhoto(t.files[0],function(u){ if(!draft) return; draft.cheque=u; document.getElementById('chqPrev').innerHTML='<img class="thumb" src="'+u+'" alt="הצ׳ק שצולם">'; }); }
+  if(t.id==='standIn'){ readPhoto(t.files[0],function(u){ if(!draft) return; draft.stand=u; document.getElementById('standPrev').innerHTML='<img class="thumb" src="'+u+'" alt="עמדת הבלונים שצולמה">'; }); }
+});
+
+render();
+
+/* self-test: read a tiny built-in PDF so the driver sees at a glance that import will work here */
+window.addEventListener('load',function(){
+  if(!window.pdfjsLib || !window.pdfjsWorker){ pdfReady=false; if(state.phase==='morning') render(); return; }
+  var src='%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'+
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 50]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n'+
+    '4 0 obj<</Length 35>>stream\nBT /F1 12 Tf 10 20 Td (GAZGAL) Tj ET\nendstream endobj\n'+
+    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF';
+  var bytes=new Uint8Array(src.length); for(var i=0;i<src.length;i++) bytes[i]=src.charCodeAt(i);
+  pdfjsLib.getDocument({data:bytes, isEvalSupported:false}).promise
+    .then(function(p){ return p.getPage(1); }).then(function(pg){ return pg.getTextContent(); })
+    .then(function(tc){ pdfReady = tc.items.some(function(x){ return /GAZGAL/.test(x.str); }); })
+    .catch(function(){ pdfReady=false; })
+    .then(function(){ if(state.phase==='morning' && !document.querySelector('.loading')) render(); });
+});
+
+/* installed version: works offline after the first open */
+if('serviceWorker' in navigator && location.protocol==='https:' && !/claude/.test(location.host)){
+  window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
+
+/* dev harness: on localhost only, ?pdf=<path> imports that file on load */
+window.addEventListener('load',function(){
+  try{ if(location.hostname!=='localhost') return; var f=new URLSearchParams(location.search).get('pdf'); if(!f) return;
+    fetch(f).then(function(r){ return r.blob(); }).then(function(b){ importPdf(b); }); }catch(e){}
+});
+})();
+</script>
+</html>
