@@ -288,9 +288,12 @@ function sampleStops(){
 var KEY = 'gazgal-driver-v3';
 var state, photos = {}, memPhotos = {}, draft = null, pdfReady = null;
 function fresh(keep){
-  return { source:'sample', journal:'11625', date:'29/09/2026', driver:'נדיר ואנונו', check:null,
-    stops:sampleStops(), phase:'morning', view:'route', start:'ofakim',
+  return { source:'none', journal:'', date:'', driver:'', check:null,
+    stops:[], phase:'morning', view:'route', start:'ofakim',
     counts: keep ? keep.counts : [], memory: keep ? keep.memory : {} };
+}
+function sampleDay(){
+  return { source:'sample', journal:'11625', date:'29/09/2026', driver:'נדיר ואנונו', check:null, stops:sampleStops() };
 }
 function migrate(s){
   /* days saved by the first version had one journal and no journal list */
@@ -367,7 +370,11 @@ function contacts(s){
 function intl(num){ return '972'+String(num).replace(/\D/g,'').replace(/^0/,''); }
 function pending(){ return state.stops.filter(function(s){ return s.status==='pending'; }); }
 function done(){ return state.stops.filter(function(s){ return s.status!=='pending'; }); }
-function cur(){ return pending()[0] || null; }
+function inActive(s){ return !state.activeJ || (s.journal||state.journal)===state.activeJ; }
+function routePending(){ return pending().filter(inActive); }
+function others(){ return pending().filter(function(x){ return !inActive(x); }); }
+function cur(){ return routePending()[0] || null; }
+function stopsOf(no){ return state.stops.filter(function(s){ return (s.journal||state.journal)===no; }); }
 function cashTotals(){
   var t={cash:0,cheque:0,office:0,unpaid:0,prepaid:0,nc:0,nq:0};
   done().forEach(function(s){ var p=s.result && s.result.payment; if(!p || p.method==='none') return;
@@ -594,7 +601,7 @@ async function startPoint(fromHere){
 }
 function wake(){ try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').catch(function(){}); }catch(e){} }
 async function autoRoute(fromHere){
-  var app=document.getElementById('app'), ps=pending(), located=[], missing=[];
+  var app=document.getElementById('app'), ps=routePending(), rest0=others(), located=[], missing=[];
   function prog(i){ app.innerHTML=topbar()+'<main><div class="loading"><div class="spin"></div>ממקם כתובות במפה… '+i+' / '+ps.length+
     '<span class="hint center">כתובת חדשה לוקחת כשנייה. כתובת שכבר נמצאה פעם נשמרת בטלפון.</span></div></main>'; }
   prog(0);
@@ -602,7 +609,7 @@ async function autoRoute(fromHere){
     var start=await startPoint(fromHere);
     for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; ps[i].pt=L.p||null; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
     var r=optimize(start, located);
-    state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing);
+    state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing, rest0);
     state.phase='route'; state.view='route'; save(); render(); window.scrollTo(0,0); wake();
     toast('סודר לפי מפה · כ־'+Math.round(r.km)+' ק״מ בקו אווירי'+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
   }catch(e){
@@ -613,7 +620,7 @@ async function autoRoute(fromHere){
 
 /* a hot order goes where it adds the least driving to what is left of the route */
 async function placeHot(s){
-  var arr=state.stops, ps=pending(), L=await locate(s); s.geoHow=L.how; s.pt=L.p||null;
+  var arr=state.stops, ps=routePending(), L=await locate(s); s.geoHow=L.how; s.pt=L.p||null;
   if(!L.p){ arr.push(s); return 'לא נמצא במפה — נוספה בסוף הסבב'; }
   for(var i=0;i<ps.length;i++){ if(ps[i].pt===undefined){ var l2=await locate(ps[i]); ps[i].pt=l2.p||null; } }
   var origin=null; try{ var pos=await here(); origin=[pos.coords.latitude,pos.coords.longitude]; }catch(e){}
@@ -848,10 +855,10 @@ async function urgentRoute(id){
   closeSheet(); save(); render(); window.scrollTo(0,0); toast('🚨 '+s.name+' — העצירה הבאה. מסדר את השאר ממנה…');
   try{
     var L=await locate(s); if(!L.p){ toast('🚨 '+s.name+' — הבאה (לא נמצאה במפה, השאר בלי שינוי)'); return; }
-    var rest=pending().filter(function(x){ return x!==s; }), located=[], missing=[];
+    var rest=routePending().filter(function(x){ return x!==s; }), rest1=others().filter(function(x){ return x!==s; }), located=[], missing=[];
     for(var i=0;i<rest.length;i++){ var l2=rest[i].pt!==undefined ? {p:rest[i].pt} : await locate(rest[i]); rest[i].pt=l2.p||null; if(l2.p) located.push({s:rest[i], p:l2.p}); else missing.push(rest[i]); }
     var r=optimize(L.p, located);
-    state.stops=done().concat([s], r.path.map(function(x){ return x.s; }), missing); save(); render();
+    state.stops=done().concat([s], r.path.map(function(x){ return x.s; }), missing, rest1); save(); render();
     toast('🚨 '+s.name+' הבאה, והשאר מסודר מהמקום שלה');
   }catch(e){ toast('🚨 '+s.name+' — הבאה (אין גישה למפה, השאר בלי שינוי)'); }
 }
@@ -861,7 +868,7 @@ function firstName(){ return (state.driver||'').split(' ')[0] || ''; }
 function topbar(){
   var d=done().length, n=state.stops.length, t=cashTotals();
   return (state.source==='sample' ? '<div class="demo">יומן לדוגמה · הנתונים מומצאים. ייבא את היומן שלך מבש״ן כדי להתחיל.</div>' : '')+
-  '<header class="topbar"><div class="row"><span class="j">יומן '+esc(state.journal)+(state.journals.length>1?' +'+(state.journals.length-1):'')+' · '+esc(state.day||state.date)+' · '+esc(state.driver)+'</span>'+
+  '<header class="topbar"><div class="row"><span class="j">'+(state.source==='none' ? 'אין יומן טעון' : 'יומן '+esc(state.activeJ||state.journal)+(state.activeJ?' (מסונן)':state.journals.length>1?' +'+(state.journals.length-1):''))+' · '+esc(state.day||state.date)+(state.driver?' · '+esc(state.driver):'')+'</span>'+
   '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
   '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></div>'+
   '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div></header>';
@@ -897,7 +904,42 @@ function actsHtml(c){
 function pills(s){ return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
 
 /* ================= screens ================= */
+function pdfHint(){
+  return pdfReady===true ? '<p class="hint" style="color:var(--ok);font-weight:800">✓ קורא ה־PDF מוכן</p>'
+   : pdfReady===false ? '<p class="err">⚠ קורא ה־PDF לא נטען. צריך קליטה — רענן את הדף ונסה שוב.</p>' : '<p class="hint">בודק את קורא ה־PDF…</p>';
+}
+function journalsCard(){
+  if(state.source!=='pdf' || !state.journals.length) return '';
+  var many=state.journals.length>1;
+  return '<section class="card"><div class="sec" style="margin:0"><h3>יומנים טעונים</h3><span class="muted num">'+state.journals.length+'</span></div>'+
+    state.journals.map(function(j){ var js=stopsOf(j.no), h=js.filter(function(x){ return x.status!=='pending'; }).length;
+      return '<div class="sec" style="margin:0;align-items:center"><span><b class="num">יומן '+esc(j.no)+'</b>'+(j.no===state.journal?' <span class="tag t-info">ראשי</span>':'')+
+        '<br><span class="muted num" style="font-size:14px">'+js.length+' הזמנות · '+h+' טופלו</span></span>'+
+        '<span style="display:flex;gap:6px">'+(many && state.phase==='route'?'<button class="btn btn-ghost btn-sm" style="min-height:40px" type="button" data-activej="'+esc(j.no)+'">הצג</button>':'')+
+        '<button class="btn btn-ghost btn-sm" style="min-height:40px" type="button" data-deljournal="'+esc(j.no)+'" aria-label="הסר את יומן '+esc(j.no)+'">🗑 הסר</button></span></div>'; }).join('')+
+    '<label class="filebtn">➕ הוסף יומן נוסף<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-sheet="resetday">↺ נקה הכל ותתחיל מחדש</button></section>';
+}
+function journalChips(){
+  if(state.journals.length<2) return '';
+  var nos=[''].concat(state.journals.map(function(j){ return j.no; }));
+  return '<div class="chips" role="group" aria-label="איזה יומן להציג">'+nos.map(function(no){
+    var left=no ? stopsOf(no).filter(function(x){ return x.status==='pending'; }).length : pending().length;
+    return '<button type="button" class="chip" data-activej="'+esc(no)+'" aria-pressed="'+((state.activeJ||'')===no)+'">'+(no?'יומן '+esc(no):'הכל')+' <span class="muted num">'+left+'</span></button>'; }).join('')+'</div>';
+}
+function viewEmpty(){
+  return '<main><div class="hero"><span class="eyebrow">בוקר</span><h1>בוקר טוב</h1></div>'+
+  '<section class="card center" style="justify-items:center"><span style="font-size:42px" aria-hidden="true">📄</span><h3>אין כרגע יומן טעון</h3>'+
+  '<p class="muted" style="margin:0">מייבאים את ה־PDF של ״דוח הזמנות לפי יומן״ מבש״ן. הקובץ נקרא בטלפון ולא נשלח לשום מקום.</p>'+
+  '<label class="filebtn big" style="width:100%">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>'+pdfHint()+'</section>'+
+  '<section class="card"><div class="sec" style="margin:0"><h3>ספירת מלאי</h3><span class="muted num">'+state.counts.length+' היום</span></div>'+
+  '<button class="btn btn-ghost btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button>'+countsList()+'</section>'+
+  '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
+  '<button class="btn btn-ghost btn-sm" type="button" id="loadSample">נסה עם יומן לדוגמה (נתונים מומצאים)</button>'+
+  '</main>';
+}
 function viewMorning(){
+  if(!state.stops.length) return viewEmpty();
   var q={'1':0,'2':0}, other=0, col=0, ver=0, warn=[];
   state.stops.forEach(function(s){
     s.items.forEach(function(i){ if(q[i.code]!=null) q[i.code]+=i.qty; else other+=i.qty; });
@@ -915,12 +957,9 @@ function viewMorning(){
   '<div class="kpi"><span class="v num">'+money(col)+'</span><span class="k">לגבות בשטח'+(ver?' + '+ver+' לוודא':'')+'</span></div>'+
   '<div class="kpi"><span class="v num">'+q['1']+'</span><span class="k">בלונים 12 ק״ג</span></div>'+
   '<div class="kpi"><span class="v num">'+q['2']+'</span><span class="k">בלונים 48 ק״ג'+(other?' · +'+other+' אחר':'')+'</span></div></div>'+
-  '<label class="filebtn big">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>'+
-  (state.source==='pdf'?'<label class="filebtn">➕ הוסף יומן נוסף לאותו יום<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>':'')+
+  (state.source==='pdf' ? '' : '<label class="filebtn big">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>')+
   '<p class="hint">בוחרים את ה־PDF של ״דוח הזמנות לפי יומן״. הקובץ נקרא בטלפון ולא נשלח לשום מקום. יומן ראשון מחליף את הדוגמה; ״הוסף יומן״ מצרף עוד יומן לאותו יום.</p>'+
-  (pdfReady===true ? '<p class="hint" style="color:var(--ok);font-weight:800">✓ קורא ה־PDF מוכן</p>'
-   : pdfReady===false ? '<p class="err">⚠ קורא ה־PDF לא נטען. צריך קליטה — רענן את הדף ונסה שוב.</p>'
-   : '<p class="hint">בודק את קורא ה־PDF…</p>')+'</section>'+
+  pdfHint()+'</section>'+journalsCard()+
   (warn.length?'<section class="card"><div class="sec" style="margin:0"><h3>לבדוק לפני יציאה</h3><span class="tag t-warn num">'+warn.length+'</span></div><div class="list">'+
     warn.map(function(s){ var why=[]; if(mode(s)==='verify') why.push(/שולם/.test(s.note||'')?'״שולם״ בהערה':'לא מסומן כשולם'); if(s.cityGuess) why.push('אין יישוב ביומן — הונח '+s.city); if(/פיקטיבית/.test(s.note||'')) why.push('הזמנה פיקטיבית');
       return '<div class="li" style="box-shadow:none;background:var(--surface-2)"><span class="n num">'+s.row+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(why.join(' · '))+'</div></div><span></span></div>'; }).join('')+
@@ -937,7 +976,7 @@ function viewMorning(){
   '</main>';
 }
 function viewRoute(){
-  var c=cur(), p=pending(), d=done(), out='<main>';
+  var c=cur(), p=routePending(), d=done(), out='<main>'+journalChips();
   if(!c){
     out+='<section class="card center"><span class="eyebrow">הסבב הושלם</span><h2 style="font-family:var(--display);font-weight:400;font-size:26px">כל העצירות טופלו</h2>'+
     '<p class="muted" style="margin:0">עבור ל״סוף יום״ לספירה ולדוח הסגירה.</p><button class="btn btn-accent" type="button" data-view="end">לסוף יום</button></section>';
@@ -963,10 +1002,10 @@ function viewRoute(){
       '<button class="li-main" type="button" data-sheet="peek" data-preset="'+esc(s.id)+'"><div class="t">'+esc(s.name)+'</div><div class="s">'+(custNo(s)?'<span class="num">'+esc(custNo(s))+'</span> · ':'')+esc(addr(s))+' · '+esc(s.city)+'</div><div style="margin-top:4px">'+listTag(s)+'</div></button>'+
       '<div class="ctl"><button class="ic" type="button" data-first="'+s.id+'" aria-label="עבור עכשיו ל'+esc(s.name)+'">⤒</button><span class="drag" data-drag="'+esc(s.id)+'" role="button" aria-label="גרור כדי לשנות את המקום של '+esc(s.name)+'">⠿</span></div></div>';
     }).join('')+'</div><p class="hint center" style="margin-top:8px">לחיצה על עצירה — הודעה, חיוג, Waze. גרירה מ־⠿ — שינוי הסדר.</p>'+
-    '<label class="filebtn" style="width:100%;margin-top:10px">➕ הוסף יומן נוסף (PDF)<input type="file" id="impAdd" accept=".pdf,application/pdf"></label></section>';
-  } else if(state.source==='pdf'){
-    out+='<label class="filebtn" style="width:100%">➕ הוסף יומן נוסף (PDF)<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>';
+    '</section>';
   }
+  if(!c && state.activeJ && pending().length) out+='<button class="btn btn-accent" type="button" data-activej="">היומן הזה הושלם — הצג את כל היומנים ('+pending().length+' פתוחות)</button>';
+  out+=journalsCard();
   if(d.length){
     out+='<section><div class="sec"><h3>הושלמו · <span class="muted num">'+d.length+'</span></h3></div><div class="list">'+
     d.slice().reverse().map(function(s){ var r=s.result||{}, py=r.payment;
@@ -1357,8 +1396,21 @@ function openSheet(kind,preset){
   if(kind==='order'){
     draft={seq:[]};
     html='<h2>סדר המסלול</h2><p class="hint">לחץ על העצירות לפי הסדר שבו תיסע. לחיצה נוספת מבטלת. מה שלא תסמן יישאר בסוף, באותו סדר.</p><div class="list">'+
-    pending().map(function(s){ return '<button type="button" class="li" data-ord="'+s.id+'"><span class="n num" id="ordn-'+s.id+'">·</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div></div><span>'+listTag(s)+'</span></button>'; }).join('')+
+    routePending().map(function(s){ return '<button type="button" class="li" data-ord="'+s.id+'"><span class="n num" id="ordn-'+s.id+'">·</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div></div><span>'+listTag(s)+'</span></button>'; }).join('')+
     '</div><button class="btn btn-accent" type="button" id="applyOrder">החל את הסדר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='deljournal'){
+    var dj=preset, djs=stopsOf(dj).filter(function(x){ return !x.hot; });
+    draft={deljournal:dj};
+    html='<h2>להסיר את יומן '+esc(dj)+'?</h2><p style="margin:0">'+djs.length+' ההזמנות שלו יוסרו מהסבב. אפשר לייבא אותו שוב אחר כך.</p>'+
+      (dj===state.journal && state.journals.length>1 ? '<p class="hint">זה היומן הראשי — הבא בתור יהפוך לראשי.</p>' : '')+
+      '<button class="btn btn-bad" type="button" id="confirmDelJournal">כן, הסר את היומן</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='resetday'){
+    var hd=done().filter(function(x){ return x.status==='delivered'; }), ct=cashTotals();
+    html='<h2>לנקות הכל ולהתחיל מחדש?</h2><p style="margin:0">היומנים, ההזמנות והסימונים של היום יימחקו, ואפשר לייבא יומן מחדש. <b>ספירות המלאי ומה שנשמר על חניות — נשארים.</b></p>'+
+      (hd.length ? '<div class="note">⚠ כבר סומנו '+hd.length+' אספקות'+(ct.cash+ct.cheque?' ו־'+money(ct.cash+ct.cheque)+' בקופה':'')+'. גם הן יימחקו. אם היום אמיתי — עדיף ״סגור יום״, שם הדוח נשמר.</div>' : '')+
+      '<button class="btn btn-bad" type="button" id="confirmResetDay">כן, נקה והתחל מחדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   if(kind==='office'){
     if(!(officeIn && officeIn.blob)) draft={};
@@ -1605,6 +1657,23 @@ document.addEventListener('click',function(ev){
   if(ds.offnew){ var of=draft.f, om=draft.msg; officeIn=null; openSheet('hot'); fillHot(of,om); return; }
   if(ds.urgent){ officeIn=null; urgentRoute(ds.urgent); return; }
   if(ds.hkit){ draft.kit=ds.hkit==='1'; press('[data-hkit]',t); updHotAmt(); return; }
+  if(ds.activej!==undefined){ state.activeJ=ds.activej||null; if(state.phase!=='route') state.phase='route'; state.view='route'; save(); closeSheet(); render(); window.scrollTo(0,0);
+    toast(state.activeJ ? 'מציג את יומן '+state.activeJ : 'מציג את כל היומנים'); return; }
+  if(ds.deljournal){ var dno=ds.deljournal, handled=stopsOf(dno).filter(function(x){ return x.status!=='pending' && !x.hot; });
+    if(handled.length){ toast('ביומן '+dno+' כבר סומנו '+handled.length+' עצירות. כדי להסיר אותו, פתח אותן מחדש (↺) קודם.'); return; }
+    openSheet('deljournal', dno); return; }
+  if(t.id==='confirmDelJournal'){ var rj=draft.deljournal;
+    state.stops=state.stops.filter(function(x){ return x.hot || (x.journal||state.journal)!==rj; });
+    state.journals=state.journals.filter(function(j){ return j.no!==rj; });
+    if(state.activeJ===rj || state.journals.length<2) state.activeJ=null;
+    if(state.journal===rj){ var nj=state.journals[0];
+      if(nj){ state.journal=nj.no; state.date=nj.date||state.date; state.check=nj.check||null; state.stops.forEach(function(x){ if(x.hot && x.journal===rj) x.journal=nj.no; }); }
+      else { state=migrate(Object.assign(fresh(state), {start:state.start, day:state.day, facility:state.facility, dayNote:state.dayNote})); } }
+    after('יומן '+rj+' הוסר'); return; }
+  if(t.id==='confirmResetDay'){ var kept=state; photos={}; savePhotos();
+    state=migrate(Object.assign(fresh(kept), {start:kept.start, day:kept.day, facility:kept.facility, dayNote:kept.dayNote}));
+    after('נוקה. אפשר לייבא יומן מחדש.'); return; }
+  if(t.id==='loadSample'){ var ks=state; state=migrate(Object.assign(sampleDay(), {phase:'morning', view:'route', start:ks.start, counts:ks.counts, memory:ks.memory})); after('נטען יומן לדוגמה — הנתונים מומצאים'); return; }
   if(t.id==='sharePdf'){ sharePdf(); return; }
   if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
   if(ds.start){ state.start=ds.start; save(); render(); return; }
@@ -1657,6 +1726,7 @@ document.addEventListener('click',function(ev){
       save(); render(); window.scrollTo(0,0); toast('נפתח מחדש: '+r.name); }
     return;
   }
+  if((t.id==='goAuto'||t.id==='goRoute'||t.id==='goManual') && !state.stops.length){ toast('קודם מייבאים יומן'); return; }
   if(t.id==='goAuto'){ autoRoute(false); return; }
   if(t.id==='reAuto'){ autoRoute(true); return; }
   if(t.id==='gpsPark'){
@@ -1669,8 +1739,8 @@ document.addEventListener('click',function(ev){
   if(t.id==='goManual'){ startRoute(true); return; }
   if(t.id==='applyOrder'){
     var chosen=draft.seq.map(function(id){ return state.stops.filter(function(x){ return x.id===id; })[0]; }).filter(Boolean);
-    var rest=pending().filter(function(x){ return chosen.indexOf(x)<0; });
-    state.stops=done().concat(chosen, rest);
+    var rest=routePending().filter(function(x){ return chosen.indexOf(x)<0; });
+    state.stops=done().concat(chosen, rest, others());
     after(chosen.length ? 'הסדר עודכן' : null); return;
   }
   if(t.id==='saveCount'){ saveCount(); return; }
@@ -1716,8 +1786,8 @@ document.addEventListener('pointermove',function(ev){
 function endDrag(){
   if(!drag) return; var d=drag; drag=null;
   if(d.to!==d.from){
-    var ps=pending(), head=ps[0], q=ps.slice(1), mv=q.splice(d.from,1)[0]; q.splice(d.to,0,mv);
-    state.stops=done().concat([head], q); save(); toast(mv.name+' הועבר למקום '+(done().length+d.to+2));
+    var ps=routePending(), head=ps[0], q=ps.slice(1), mv=q.splice(d.from,1)[0]; q.splice(d.to,0,mv);
+    state.stops=done().concat([head], q, others()); save(); toast(mv.name+' הועבר למקום '+(done().length+d.to+2));
   }
   render();
 }
