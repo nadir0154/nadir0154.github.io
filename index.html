@@ -808,6 +808,9 @@ async function runOffice(){
   try{ if(officeIn.blob) f=await readCard(officeIn.blob, say); }
   catch(e){ try{ console.error(e); }catch(_){} f={phones:[], err:true}; }
   f.phones=(f.phones||[]).concat(msg.phones.filter(function(p){ return (f.phones||[]).indexOf(p)<0; }));
+  /* a card number written in the text ("כרטיס 18677") counts too */
+  var tcard=(String(officeIn.text||'').match(/(?:כרטיס|לקוח|צרכן)\D{0,3}(\d{3,6})/)||['',''])[1];
+  if(tcard && (!f.card || !state.stops.some(function(s){ return s.cust===f.card; }))) f.card=tcard;
   draft={office:true, f:f, msg:msg, match:matchStop(f)};
   box.innerHTML=officeResultHtml();
 }
@@ -861,6 +864,102 @@ async function urgentRoute(id){
     state.stops=done().concat([s], r.path.map(function(x){ return x.s; }), missing, rest1); save(); render();
     toast('🚨 '+s.name+' הבאה, והשאר מסודר מהמקום שלה');
   }catch(e){ toast('🚨 '+s.name+' — הבאה (אין גישה למפה, השאר בלי שינוי)'); }
+}
+
+/* ================= the office bot: messages the office sends to the GazGal WhatsApp number =================
+   The server only relays (see server/ in the repo). This phone pulls new messages every 30 s while the app is open,
+   reads the screenshot itself (readCard above), and tells the bot what the driver did so the office gets an answer.
+   The phone is connected once: it makes a random key, and the driver approves it by sending "חבר 1234" to the bot. */
+var BOT_API = location.hostname==='localhost' ? 'http://localhost:8787' : 'https://bot.gazgal.com';
+var BOT_KEY_LS='gazgal-bot-key', INBOX_LS='gazgal-inbox';
+var bot={status:'off', inbox:[], polling:null, ackId:null, name:''};
+try{ bot.inbox=JSON.parse(localStorage.getItem(INBOX_LS)||'[]')||[]; }catch(e){ bot.inbox=[]; }
+try{ bot.status=localStorage.getItem('gazgal-bot-status')||'off'; }catch(e){}
+function botKey(){
+  var k=null; try{ k=localStorage.getItem(BOT_KEY_LS); }catch(e){}
+  if(!k){ var a=new Uint8Array(32); crypto.getRandomValues(a); k=[].map.call(a,function(b){ return ('0'+b.toString(16)).slice(-2); }).join(''); try{ localStorage.setItem(BOT_KEY_LS,k); }catch(e){} }
+  return k;
+}
+function botFetch(path,opt){ opt=opt||{}; opt.headers=Object.assign({authorization:'Bearer '+botKey()}, opt.headers||{}); return fetch(BOT_API+path,opt); }
+function setBotStatus(s){ bot.status=s; try{ localStorage.setItem('gazgal-bot-status',s); }catch(e){} }
+function saveInbox(){ try{ localStorage.setItem(INBOX_LS, JSON.stringify(bot.inbox.slice(-60))); }catch(e){} }
+function newCount(){ return bot.inbox.filter(function(m){ return m.status==='new'; }).length; }
+async function pollInbox(quiet,force){
+  if(!BOT_API || bot.status!=='active' || (document.hidden && !force)) return;
+  try{
+    var last=bot.inbox.reduce(function(t,m){ return Math.max(t,m.received||0); },0);
+    var r=await botFetch('/api/inbox'+(last?'?since='+(last-1):''));
+    if(r.status===401||r.status===403){ setBotStatus('off'); render(); return; }
+    var j=await r.json(), before=newCount(), fresh=0;
+    (j.messages||[]).forEach(function(m){ var i=bot.inbox.findIndex(function(x){ return x.id===m.id; });
+      if(i<0){ bot.inbox.push(m); if(m.status==='new') fresh++; } else bot.inbox[i]=Object.assign(bot.inbox[i], {status:m.status, result:m.result}); });
+    saveInbox();
+    if(fresh && !quiet){ toast('📥 '+(fresh>1?fresh+' הודעות חדשות':'הודעה חדשה')+' מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} }
+    if(newCount()!==before && !document.querySelector('.scrim')) render();
+  }catch(e){ /* no signal — try again next time */ }
+}
+function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(!BOT_API || bot.status!=='active') return; pollInbox(true); bot.polling=setInterval(pollInbox, 30000); }
+document.addEventListener('visibilitychange',function(){ if(!document.hidden) pollInbox(); });
+async function botAck(status,result){
+  var id=bot.ackId; if(!id || !BOT_API) return; bot.ackId=null;
+  var m=bot.inbox.filter(function(x){ return x.id===id; })[0]; if(m){ m.status=status; m.result=result||''; saveInbox(); }
+  try{ await botFetch('/api/ack',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:id, status:status, result:result||''})}); }catch(e){}
+}
+async function openInboxMsg(id){
+  var m=bot.inbox.filter(function(x){ return x.id===id; })[0]; if(!m) return;
+  var blob=null;
+  if(m.has_image){ try{ var r=await botFetch('/api/image/'+encodeURIComponent(id)); if(r.ok) blob=await r.blob(); }catch(e){} if(!blob){ toast('אין קליטה — הצילום לא ירד. נסה שוב.'); return; } }
+  if(m.status==='new'){ m.status='seen'; saveInbox(); try{ botFetch('/api/ack',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:id, status:'seen'})}); }catch(e){} }
+  closeSheet(); bot.ackId=id; officeIn={blob:blob, text:m.text||''}; openSheet('office');
+  if(!blob) runOfficeText();
+}
+/* a text-only message (e.g. a cancellation without a screenshot) */
+function runOfficeText(){
+  var box=document.getElementById('offBox'); if(!box) return;
+  var msg=parseMsg(officeIn.text), f={phones:msg.phones.slice(), card:(officeIn.text.match(/(?:כרטיס|לקוח|צרכן)\D{0,3}(\d{3,6})/)||['',''])[1], name:''};
+  draft={office:true, f:f, msg:msg, match:matchStop(f)}; box.innerHTML=officeResultHtml();
+}
+async function pairAdmin(){
+  var inp=document.getElementById('adminCode'), err=document.getElementById('pairErr'), code=inp?inp.value:''; if(!code) return;
+  try{ var r=await botFetch('/api/pair/admin',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code:code})});
+    if(inp) inp.value='';
+    if(r.ok){ setBotStatus('active'); closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; }
+    err.hidden=false; err.textContent = r.status===429 ? 'יותר מדי ניסיונות — נסה שוב בעוד שעה' : 'הקוד לא נכון';
+  }catch(e){ err.hidden=false; err.textContent='אין חיבור לשרת'; }
+}
+async function pairStart(){
+  if(!BOT_API){ toast('הבוט עוד לא מחובר לשרת'); return; }
+  try{
+    var r=await fetch(BOT_API+'/api/pair',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({key:botKey(), name:(state.driver||'נהג')})});
+    var j=await r.json();
+    if(j.status==='active'){ setBotStatus('active'); closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; }
+    if(!j.code) throw new Error('no code');
+    setBotStatus('pending'); draft={pairCode:j.code, bot:j.bot};
+    var box=document.getElementById('pairBox'); if(box) box.innerHTML=
+      '<div class="field"><label for="adminCode">קוד מנהל</label><input class="inp" id="adminCode" type="password" autocomplete="off">'+
+      '<button class="btn btn-ok btn-sm" type="button" id="pairAdmin">חבר</button><p class="err" id="pairErr" hidden></p></div>'+
+      (j.bot ? '<p class="hint" style="margin-top:8px">או בלי קוד: שלח לבוט בוואטסאפ, מהמספר שלך, <b class="num">חבר '+esc(j.code)+'</b> — '+
+        '<a href="https://wa.me/'+esc(j.bot)+'?text='+encodeURIComponent('חבר '+j.code)+'" target="_blank" rel="noopener">פתח וואטסאפ</a></p>' : '')+
+      '<p class="hint" id="pairWait">מחכה לחיבור…</p>';
+    for(var i=0;i<200;i++){ await sleep(3000); if(!document.getElementById('pairBox')) return;
+      var s=await (await botFetch('/api/pair')).json().catch(function(){ return {}; });
+      if(s.status==='active'){ setBotStatus('active'); bot.name=s.name||''; closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; } }
+  }catch(e){ toast('אין חיבור לשרת הבוט. בדוק קליטה ונסה שוב.'); }
+}
+function botCard(){
+  if(!BOT_API) return '';
+  if(bot.status!=='active') return '<section class="card"><div class="sec" style="margin:0"><h3>🤖 בוט המשרד</h3><span class="tag t-warn">לא מחובר</span></div>'+
+    '<p class="hint">המשרד שולח תוספות למספר הוואטסאפ של גז גל, והן מגיעות לכאן לבד.</p><button class="btn btn-ghost btn-sm" type="button" data-sheet="pair">חבר את הטלפון לבוט</button></section>';
+  var n=newCount();
+  return n ? '<button class="btn btn-accent" type="button" data-sheet="inbox">📥 '+n+' '+(n>1?'הודעות חדשות':'הודעה חדשה')+' מהמשרד</button>' : '';
+}
+function inboxHtml(){
+  var list=bot.inbox.slice().sort(function(a,b){ return b.received-a.received; }).slice(0,30);
+  if(!list.length) return '<p class="muted center">עוד לא הגיעו הודעות מהמשרד.</p>';
+  var ST={'new':['חדשה','t-acc'], seen:['נפתחה','t-info'], added:['נכנס לסבב','t-ok'], cancelled:['סומן בוטל','t-warn'], dismissed:['נסגרה','t-info']};
+  return '<div class="list">'+list.map(function(m){ var st=ST[m.status]||ST.seen, t=new Date(m.received);
+    return '<button type="button" class="li" data-inbox="'+esc(m.id)+'"><span class="n">'+(m.has_image?'🖼️':'💬')+'</span><div><div class="t">'+esc((m.text||'(צילום בלי טקסט)').slice(0,70))+'</div>'+
+      '<div class="s num">'+t.toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit'})+' '+t.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})+(m.result?' · '+esc(m.result):'')+'</div></div><span class="tag '+st[1]+'">'+st[0]+'</span></button>'; }).join('')+'</div>';
 }
 
 /* ================= pieces ================= */
@@ -934,7 +1033,7 @@ function viewEmpty(){
   '<label class="filebtn big" style="width:100%">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>'+pdfHint()+'</section>'+
   '<section class="card"><div class="sec" style="margin:0"><h3>ספירת מלאי</h3><span class="muted num">'+state.counts.length+' היום</span></div>'+
   '<button class="btn btn-ghost btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button>'+countsList()+'</section>'+
-  '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
+  botCard()+'<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '<button class="btn btn-ghost btn-sm" type="button" id="loadSample">נסה עם יומן לדוגמה (נתונים מומצאים)</button>'+
   '</main>';
 }
@@ -959,7 +1058,7 @@ function viewMorning(){
   '<div class="kpi"><span class="v num">'+q['2']+'</span><span class="k">בלונים 48 ק״ג'+(other?' · +'+other+' אחר':'')+'</span></div></div>'+
   (state.source==='pdf' ? '' : '<label class="filebtn big">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>')+
   '<p class="hint">בוחרים את ה־PDF של ״דוח הזמנות לפי יומן״. הקובץ נקרא בטלפון ולא נשלח לשום מקום. יומן ראשון מחליף את הדוגמה; ״הוסף יומן״ מצרף עוד יומן לאותו יום.</p>'+
-  pdfHint()+'</section>'+journalsCard()+
+  pdfHint()+'</section>'+botCard()+journalsCard()+
   (warn.length?'<section class="card"><div class="sec" style="margin:0"><h3>לבדוק לפני יציאה</h3><span class="tag t-warn num">'+warn.length+'</span></div><div class="list">'+
     warn.map(function(s){ var why=[]; if(mode(s)==='verify') why.push(/שולם/.test(s.note||'')?'״שולם״ בהערה':'לא מסומן כשולם'); if(s.cityGuess) why.push('אין יישוב ביומן — הונח '+s.city); if(/פיקטיבית/.test(s.note||'')) why.push('הזמנה פיקטיבית');
       return '<div class="li" style="box-shadow:none;background:var(--surface-2)"><span class="n num">'+s.row+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(why.join(' · '))+'</div></div><span></span></div>'; }).join('')+
@@ -976,7 +1075,7 @@ function viewMorning(){
   '</main>';
 }
 function viewRoute(){
-  var c=cur(), p=routePending(), d=done(), out='<main>'+journalChips();
+  var c=cur(), p=routePending(), d=done(), out='<main>'+botCard()+journalChips();
   if(!c){
     out+='<section class="card center"><span class="eyebrow">הסבב הושלם</span><h2 style="font-family:var(--display);font-weight:400;font-size:26px">כל העצירות טופלו</h2>'+
     '<p class="muted" style="margin:0">עבור ל״סוף יום״ לספירה ולדוח הסגירה.</p><button class="btn btn-accent" type="button" data-view="end">לסוף יום</button></section>';
@@ -1399,6 +1498,13 @@ function openSheet(kind,preset){
     routePending().map(function(s){ return '<button type="button" class="li" data-ord="'+s.id+'"><span class="n num" id="ordn-'+s.id+'">·</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div></div><span>'+listTag(s)+'</span></button>'; }).join('')+
     '</div><button class="btn btn-accent" type="button" id="applyOrder">החל את הסדר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
+  if(kind==='pair'){
+    html='<h2>🤖 חיבור לבוט המשרד</h2><p style="margin:0">פעם אחת בלבד. אחרי החיבור, כל מה שהמשרד שולח למספר הוואטסאפ של גז גל יגיע לאפליקציה.</p>'+
+      '<div id="pairBox"><div class="loading" style="padding:10px 0"><div class="spin"></div>יוצר קוד…</div></div><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='inbox'){
+    html='<h2>📥 הודעות מהמשרד</h2>'+inboxHtml()+'<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  }
   if(kind==='deljournal'){
     var dj=preset, djs=stopsOf(dj).filter(function(x){ return !x.hot; });
     draft={deljournal:dj};
@@ -1498,6 +1604,7 @@ function openSheet(kind,preset){
   if(kind==='hot'){
     draft={q:{'1':0,'2':1}, pay:'collect', pos:'map', kit:false};
     html='<h2>הזמנה חמה</h2>'+
+    (BOT_API && bot.status==='active' ? '<button class="btn btn-ghost btn-sm" type="button" data-sheet="inbox">📥 הודעות מהבוט'+(newCount()?' ('+newCount()+' חדשות)':'')+'</button>' : '')+
     '<button class="btn btn-ghost btn-sm" type="button" data-sheet="office">📥 מצילום של המשרד (וואטסאפ)</button>'+'<p class="hint">הזמנה שנכנסה תוך כדי סבב, או הזמנה מודפסת שקיבלת מנהג אחר. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
     '<div class="field"><label for="hName">שם</label><input class="inp" id="hName" autocomplete="off"></div>'+
     '<div class="grid2"><div class="field"><label for="hOrder">מס׳ הזמנה (אם יש)</label><input class="inp num" id="hOrder" inputmode="numeric" autocomplete="off"></div>'+
@@ -1531,8 +1638,9 @@ function openSheet(kind,preset){
   document.getElementById('sheetRoot').innerHTML='<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>'+html+'</div></div>';
   if(kind==='count') updateCountMsg();
   if(kind==='office' && officeIn && officeIn.blob) runOffice();
+  if(kind==='pair') pairStart();
 }
-function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; }
+function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null; }
 function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; }
 function press(sel,t){ document.querySelectorAll(sel).forEach(function(b){ b.setAttribute('aria-pressed', b===t ? 'true' : 'false'); }); }
 function after(msg){ save(); closeSheet(); render(); window.scrollTo(0,0); if(msg) toast(msg); }
@@ -1610,6 +1718,7 @@ async function confirmHot(){
   var s={id:ord||('H'+String(Date.now()).slice(-6)), orderNo:ord, row:999, cust:cust||('hot-'+Date.now()), name:name, street:street, house:g('hHouse'), ent:g('hEnt'), apt:g('hApt'), city:city,
     type:(draft.pay==='credit'?'אשראי':'באספקה'), paidFlag:(draft.pay==='paid'), discGross:0, items:items, note:g('hNote'), phones:[g('hPhone'),g('hPhone2')],
     status:'pending', result:null, hot:true, journal:jn||state.journal, fromJournal:(jn && mine.indexOf(jn)<0) ? jn : ''};
+  botAck('added', name);
   var c=cur(), arr=state.stops, msg='';
   if(draft.pos==='urgent'){ arr.splice(c?arr.indexOf(c):arr.length,0,s); save(); urgentRoute(s.id); return; }
   if(draft.pos==='map' && state.phase==='route'){
@@ -1649,13 +1758,15 @@ document.addEventListener('click',function(ev){
   if(t.id==='offRead'){ var ot=(document.getElementById('offText').value||'').trim(), ob=draft && draft.offImg;
     if(!ob && !ot){ toast('בחר צילום או הדבק את הטקסט'); return; }
     fetch(ob||'data:,').then(function(r){ return ob ? r.blob() : null; }).then(function(b){ officeIn={blob:b, text:ot}; t.hidden=true; runOffice(); }); return; }
+  if(ds.inbox){ openInboxMsg(ds.inbox); return; }
+  if(t.id==='pairAdmin'){ pairAdmin(); return; }
   if(t.id==='offReparse'){ if(!draft || !draft.office){ toast('רגע, עוד קורא את הצילום'); return; }
     draft.msg=parseMsg(document.getElementById('offText').value||''); draft.msg.phones.forEach(function(p){ if(draft.f.phones.indexOf(p)<0) draft.f.phones.push(p); });
     draft.match=matchStop(draft.f); document.getElementById('offBox').innerHTML=officeResultHtml(); toast('עודכן לפי הטקסט'); return; }
   if(ds.offcancel){ var oc=byId(ds.offcancel); if(oc){ oc.items.forEach(function(i){ i.actual=0; }); oc.status='failed';
-      oc.result={reason:CANCEL, text:(draft && draft.msg && draft.msg.text)||'', empties:{1:0,2:0}, cancelled:true}; officeIn=null; after('✕ '+oc.name+' — בוטל ע״י המשרד'); } return; }
+      oc.result={reason:CANCEL, text:(draft && draft.msg && draft.msg.text)||'', empties:{1:0,2:0}, cancelled:true}; officeIn=null; botAck('cancelled', oc.name); after('✕ '+oc.name+' — בוטל ע״י המשרד'); } return; }
   if(ds.offnew){ var of=draft.f, om=draft.msg; officeIn=null; openSheet('hot'); fillHot(of,om); return; }
-  if(ds.urgent){ officeIn=null; urgentRoute(ds.urgent); return; }
+  if(ds.urgent){ officeIn=null; var us=byId(ds.urgent); if(us) botAck('added', '🚨 '+us.name+' — הבא בתור'); urgentRoute(ds.urgent); return; }
   if(ds.hkit){ draft.kit=ds.hkit==='1'; press('[data-hkit]',t); updHotAmt(); return; }
   if(ds.activej!==undefined){ state.activeJ=ds.activej||null; if(state.phase!=='route') state.phase='route'; state.view='route'; save(); closeSheet(); render(); window.scrollTo(0,0);
     toast(state.activeJ ? 'מציג את יומן '+state.activeJ : 'מציג את כל היומנים'); return; }
@@ -1714,6 +1825,7 @@ document.addEventListener('click',function(ev){
     var arr=state.stops, ia=arr.indexOf(ps[i]), ib=arr.indexOf(ps[j]); arr[ia]=ps[j]; arr[ib]=ps[i];
     save(); render(); return;
   }
+  if(ds.first && bot.ackId){ var fs0=byId(ds.first); if(fs0) botAck('added', fs0.name+' — הבא בתור'); }
   if(ds.first){
     var s=state.stops.filter(function(x){ return x.id===ds.first; })[0], c=cur();
     if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); }
@@ -1824,6 +1936,7 @@ document.addEventListener('change',function(ev){
 });
 
 render();
+startPolling();
 if(/[?&]share=1/.test(location.search)){
   history.replaceState(null,'',location.pathname);
   caches.open('gazgal-share').then(function(c){ return Promise.all([c.match('shared-image'), c.match('shared-text')]).then(function(r){
@@ -1853,7 +1966,7 @@ if('serviceWorker' in navigator && location.protocol==='https:' && !/claude/.tes
 }
 
 /* dev harness: on localhost only, ?pdf=<path> imports that file on load */
-if(location.hostname==='localhost') window.__dbg={readCard:readCard, parseMsg:parseMsg, matchStop:matchStop, tess:tess, ocrWords:ocrWords, cropBin:cropBin, tightBlue:tightBlue, ocrBox:ocrBox};
+if(location.hostname==='localhost') window.__dbg={readCard:readCard, parseMsg:parseMsg, matchStop:matchStop, tess:tess, ocrWords:ocrWords, cropBin:cropBin, tightBlue:tightBlue, ocrBox:ocrBox, poll:function(){ return pollInbox(false,true); }};
 window.addEventListener('load',function(){
   try{ if(location.hostname!=='localhost') return; var f=new URLSearchParams(location.search).get('pdf'); if(!f) return;
     fetch(f).then(function(r){ return r.blob(); }).then(function(b){ importPdf(b); }); }catch(e){}

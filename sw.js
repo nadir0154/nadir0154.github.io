@@ -1,6 +1,6 @@
 /* Offline support: the app shell is cached; same-origin requests try the network first
    so updates arrive when there is signal, and fall back to the cache when there is none. */
-const CACHE = 'gazgal-driver-v2.3';
+const CACHE = 'gazgal-driver-v2.4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './vendor/pdf.min.js', './vendor/pdf.worker.min.js', './vendor/html2canvas.min.js', './vendor/jspdf.umd.min.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
