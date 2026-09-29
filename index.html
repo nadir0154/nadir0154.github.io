@@ -168,6 +168,54 @@ td.v,th.v{text-align:end}
 .hero h1{font-family:var(--display);font-weight:400;font-size:30px}
 .toast{position:fixed;inset-inline:16px;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:50;max-width:488px;margin:0 auto;background:var(--ink);color:var(--bg);border-radius:12px;padding:12px 14px;font-weight:800;text-align:center}
 .done-li{opacity:.82}
+.li-main{background:none;border:0;padding:0;text-align:start;min-width:0;min-height:44px}
+.drag{width:38px;height:44px;display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--muted);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.li.dragging{position:relative;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.28);outline:2px solid var(--accent)}
+.li.shift{transition:transform .15s}
+.custline{font-size:15px;color:var(--muted);margin-top:-6px}
+.custline b{color:var(--ink)}
+.linkish{background:var(--surface-2);border:1.5px dashed var(--line);border-radius:12px;min-height:48px;padding:6px 12px;text-align:start;font-size:15px;color:var(--ink)}
+.hist{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+/* the printable A4 report — always black on white, whatever the phone's theme */
+#printRoot{display:none}
+.docwrap{overflow:hidden;margin:0 auto;min-width:0;width:100%}
+.paper{width:794px;height:1123px;background:#fff;color:#000;padding:38px 42px 30px;box-sizing:border-box;position:relative;overflow:hidden;margin:0 auto 16px;box-shadow:0 2px 10px rgba(0,0,0,.25);font-family:Arial,"Assistant",sans-serif;font-size:13px;line-height:1.35;direction:rtl}
+.paper h1{font-size:20px;margin:0}
+.paper .hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #000;padding-bottom:6px;margin-bottom:12px;gap:10px}
+.paper .hdr .f{font-size:14px}
+.paper .hdr .f b{font-size:15px}
+.paper table{border-collapse:collapse;width:auto;font-size:12.5px}
+.paper td,.paper th{border:1.2px solid #000;padding:4px 7px;text-align:center;color:#000;letter-spacing:0}
+.paper th{font-weight:700;font-size:12px;background:#eee}
+.paper .lbl2{font-weight:700;text-align:start;border:0;padding-inline-end:10px;white-space:nowrap}
+.paper .row2{display:flex;gap:26px;align-items:flex-start;margin:6px 0 10px}
+.paper .sec2{font-weight:700;font-size:14px;margin:12px 0 5px;text-decoration:underline}
+.paper .big2{font-size:15px;font-weight:700}
+.paper .wide{width:100%}
+.paper .wide td,.paper .wide th{text-align:start}
+.paper .wide td.c{text-align:center}
+.paper .ord{font-size:11.5px}
+.paper .ord td,.paper .ord th{padding:3px 4px}
+.paper .ord td.c{width:26px}
+.paper .ord .nm{width:175px}
+.paper .ord td:last-child{width:150px}
+.paper .ord .ad{font-size:10px;font-weight:400;color:#333}
+.paper .ord td.chg{font-weight:800;text-decoration:underline;font-size:13px}
+.paper .grp td{background:#e6e6e6;font-weight:700;text-align:start}
+.paper .warn2{font-weight:700}
+.paper .sig{display:grid;grid-template-columns:1fr 1fr;gap:10px 30px;margin-top:10px}
+.paper .sig div{border-bottom:1.2px solid #000;padding-top:18px;font-size:12.5px}
+.paper .foot{position:absolute;bottom:14px;inset-inline:42px;display:flex;justify-content:space-between;font-size:10.5px;color:#444}
+.paper .ok2{font-weight:700}
+.paper .bad2{font-weight:700;text-decoration:underline}
+.paper ul{margin:2px 0;padding-inline-start:18px}
+@media print{
+  @page{size:A4;margin:0}
+  html,body{background:#fff!important}
+  #app,#sheetRoot,#toastRoot{display:none!important}
+  #printRoot{display:block!important}
+  .paper{margin:0;box-shadow:none;page-break-after:always;break-after:page}
+}
 .center{text-align:center}
 .loading{display:grid;place-items:center;gap:10px;padding:40px 0;font-weight:800}
 .spin{width:36px;height:36px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:sp .8s linear infinite}
@@ -178,6 +226,7 @@ td.v,th.v{text-align:end}
 <div id="app" dir="rtl" lang="he"></div>
 <div id="sheetRoot" dir="rtl" lang="he"></div>
 <div id="toastRoot" dir="rtl" lang="he"></div>
+<div id="printRoot" dir="rtl" lang="he"></div>
 
 <script>
 (function(){
@@ -186,8 +235,14 @@ document.documentElement.setAttribute('lang','he');
 
 /* ================= constants ================= */
 var VAT = 1.18;                        /* Bashan stores discounts before VAT */
-var PRICE = {'1':150, '2':450};        /* gross prices printed on the BB-454 journal */
+var PRICE = {'1':150, '2':450, 'dep1':130, 'dep2':330};   /* gross prices printed on the BB-454 journal; deposits for a new cylinder (קומפלט) */
 var KG = {'1':'12', '2':'48'};         /* Bashan item codes: 1 = 12 kg, 2 = 48 kg */
+/* Items the driver can add in the field. Amgazit codes and prices are not known yet — the driver types the price once and the phone remembers it. */
+var ITEM_NAME = {'1':'12 ק״ג', '2':'48 ק״ג', 'a5':'אמגזית 5 ק״ג', 'a25':'אמגזית 2.5 ק״ג', 'dep1':'פיקדון 12 (קומפלט)', 'dep2':'פיקדון 48 (קומפלט)'};
+var ADDABLE = ['1','2','a5','a25'];
+var OFFICE_WA = '972542222968';        /* WhatsApp of the office — the report goes here */
+var KEEP_DAYS = 90;
+var WEEKDAY = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 var TYPE_BY_CODE = {'01':'בהזמנה','02':'באספקה','03':'אשראי','04':'הוראת קבע'};
 var REASONS = ['לא ענה','לא שילם','אין גישה','ביקש לדחות','אחר'];
 var PAY = {cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המשרד', prepaid:'שולם מראש', unpaid:'לא שולם'};
@@ -232,9 +287,42 @@ function fresh(keep){
     stops:sampleStops(), phase:'morning', view:'route', start:'ofakim',
     counts: keep ? keep.counts : [], memory: keep ? keep.memory : {} };
 }
-function load(){ try{ var r=localStorage.getItem(KEY); if(r){ var s=JSON.parse(r); if(s && s.stops) return s; } }catch(e){} return fresh(); }
+function migrate(s){
+  /* days saved by the first version had one journal and no journal list */
+  if(!s.journals) s.journals = s.source==='pdf' ? [{no:s.journal, date:s.date, driver:s.driver, check:s.check}] : [];
+  s.stops.forEach(function(x){ if(!x.journal && s.source==='pdf') x.journal=s.journal; });
+  if(!s.facility) s.facility=[];
+  if(s.dayNote==null) s.dayNote='';
+  if(!s.day) s.day = s.closedAt ? s.date : todayStr();   /* the work day; the journal's own date can be the day it was printed */
+  return s;
+}
+function load(){ try{ var r=localStorage.getItem(KEY); if(r){ var s=JSON.parse(r); if(s && s.stops) return migrate(s); } }catch(e){} return migrate(fresh()); }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
 state = load();
+save();   /* pins the work day of a day that started on an older version */
+var prices={}; try{ prices=JSON.parse(localStorage.getItem('gazgal-prices')||'{}')||{}; }catch(e){ prices={}; }
+function priceOf(code){ return PRICE[code]!=null ? PRICE[code] : (prices[code]||0); }
+
+/* ---------- phone storage for photos and closed days (IndexedDB; localStorage is too small for images) ---------- */
+var dbp=null;
+function idb(){
+  if(!dbp) dbp=new Promise(function(res,rej){
+    try{ var r=indexedDB.open('gazgal-driver',1);
+      r.onupgradeneeded=function(){ var d=r.result; if(!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); if(!d.objectStoreNames.contains('days')) d.createObjectStore('days'); };
+      r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); };
+    }catch(e){ rej(e); } });
+  return dbp;
+}
+function idbDo(store,mode,fn){ return idb().then(function(d){ return new Promise(function(res,rej){ var tx=d.transaction(store,mode), st=tx.objectStore(store), out=fn(st);
+  tx.oncomplete=function(){ res(out && 'result' in out ? out.result : undefined); }; tx.onerror=function(){ rej(tx.error); }; }); }); }
+function idbPut(store,key,val){ return idbDo(store,'readwrite',function(st){ st.put(val,key); }); }
+function idbGet(store,key){ return idbDo(store,'readonly',function(st){ return st.get(key); }); }
+function idbDel(store,key){ return idbDo(store,'readwrite',function(st){ st.delete(key); }); }
+function idbKeys(store){ return idbDo(store,'readonly',function(st){ return st.getAllKeys(); }); }
+function savePhotos(){ idbPut('kv','photos',photos).catch(function(){}); idbPut('kv','memPhotos',memPhotos).catch(function(){}); }
+function loadPhotos(){
+  return Promise.all([idbGet('kv','photos'), idbGet('kv','memPhotos')]).then(function(r){ photos=r[0]||{}; memPhotos=r[1]||{}; }).catch(function(){});
+}
 
 /* ================= helpers ================= */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -242,13 +330,18 @@ function money(n){ n=Math.round((+n||0)*100)/100; return '₪'+n.toLocaleString(
 function fmtD(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||''); return m ? m[3]+'/'+m[2]+'/'+m[1].slice(2) : (iso||''); }
 function addr(s){ var a=(s.street||'')+(s.house?' '+s.house:''); if(s.ent) a+=', כניסה '+s.ent; if(s.apt) a+=', דירה '+s.apt; return a; }
 function navQ(s){ return ((s.street||'')+' '+(s.house||'')+(s.city?', '+s.city:'')).trim(); }
-function itemLabel(i){ return KG[i.code] ? KG[i.code]+' ק״ג' : (i.desc||('פריט '+i.code)); }
-function gross(items,actual){ return items.reduce(function(t,i){ return t+(actual?(i.actual||0):i.qty)*i.price; },0); }
+function itemLabel(i){ return KG[i.code] ? KG[i.code]+' ק״ג' : ITEM_NAME[i.code] || (i.desc||('פריט '+i.code)); }
+function isDep(i){ return /^dep/.test(i.code); }
+function gross(items,actual){ return items.reduce(function(t,i){ return t+(isDep(i)?0:(actual?(i.actual||0):i.qty)*i.price); },0); }
+function deposits(items,actual){ return items.reduce(function(t,i){ return t+(isDep(i)?(actual?(i.actual||0):i.qty)*i.price:0); },0); }
 function totalOf(s,actual){
+  /* the journal discount is spread over the gas actually supplied; deposits are never discounted */
   var ord=gross(s.items,false), g=gross(s.items,actual), dg=s.discGross||0;
-  var d = ord ? dg*(g/ord) : 0;
-  return Math.max(0, Math.round((g-d)*100)/100);
+  var d = ord ? dg*(Math.min(g,ord)/ord) : 0;
+  return Math.max(0, Math.round((g-d+deposits(s.items,actual))*100)/100);
 }
+function changed(s){ return s.status==='delivered' && s.items.some(function(i){ return (i.actual||0)!==i.qty; }); }
+function byId(id){ return state.stops.filter(function(x){ return x.id===id; })[0]; }
 function mode(s){
   if(s.type==='אשראי') return 'credit';
   if(s.type==='הוראת קבע') return 'standing';
@@ -290,6 +383,11 @@ function readPhoto(file,cb){
       c.getContext('2d').drawImage(img,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72)); };
     img.src=fr.result; };
   fr.readAsDataURL(file);
+}
+/* two separate buttons: on Android a single image input often opens only the gallery */
+function photoPick(kind,label){
+  return '<div class="photo"><label class="filebtn">📷 '+label+'<input type="file" accept="image/*" capture="environment" data-photo="'+kind+'"></label>'+
+    '<label class="filebtn">🖼️ מהגלריה<input type="file" accept="image/*" data-photo="'+kind+'"></label><span id="'+kind+'Prev"></span></div>';
 }
 
 /* ---------- stock counts ---------- */
@@ -399,7 +497,9 @@ function parseJournal(pages){
   stops.forEach(function(x){ if(!x.city){ x.city=topCity; x.cityGuess=true; } });
   return {meta:meta, stops:stops, sum:sum};
 }
-async function importPdf(file){
+/* append=true adds a second journal to the same day (e.g. Ofakim after Beer Sheva): nothing already done is touched,
+   orders already in the day are skipped, and the open stops are re-ordered from where the driver stands. */
+async function importPdf(file, append){
   if(!window.pdfjsLib){ toast('רכיב קריאת ה־PDF עוד לא נטען. בדוק קליטה ונסה שוב.'); return; }
   document.getElementById('app').innerHTML=topbar()+'<main><div class="loading"><div class="spin"></div>קורא את היומן…</div></main>';
   try{
@@ -409,9 +509,23 @@ async function importPdf(file){
     var check={count:res.stops.length, total:Math.round(tot*100)/100, rCount:res.sum.count, rTotal:res.sum.total,
       itemsMissing:res.stops.filter(function(x){ return !x.items.length; }).length};
     check.ok = (check.rCount==null || check.rCount===check.count) && (check.rTotal==null || Math.abs(check.rTotal-check.total)<0.05) && !check.itemsMissing;
-    state={source:'pdf', journal:res.meta.journal||'—', date:res.meta.date||'', driver:res.meta.driver||'נהג', check:check,
-      stops:res.stops, phase:'morning', view:'route', start:state.start||'ofakim', counts:state.counts, memory:state.memory};
-    photos={};
+    var jno=res.meta.journal||'—';
+    res.stops.forEach(function(x){ x.journal=jno; });
+    if(append && state.source==='pdf'){
+      var have={}; state.stops.forEach(function(x){ have[x.id]=1; });
+      var fresh2=res.stops.filter(function(x){ return !have[x.id]; }), skipped=res.stops.length-fresh2.length;
+      if(!state.journals.some(function(j){ return j.no===jno; })) state.journals.push({no:jno, date:res.meta.date||'', driver:res.meta.driver||'', check:check});
+      state.stops=state.stops.concat(fresh2);
+      save(); closeSheet();
+      toast('יומן '+jno+': נוספו '+fresh2.length+' הזמנות'+(skipped?' · '+skipped+' כבר היו':''));
+      if(!fresh2.length){ render(); return; }
+      if(state.phase==='route'){ await autoRoute(true); } else { render(); window.scrollTo(0,0); }
+      return;
+    }
+    state=migrate({source:'pdf', journal:jno, date:res.meta.date||'', driver:res.meta.driver||'נהג', check:check,
+      journals:[{no:jno, date:res.meta.date||'', driver:res.meta.driver||'', check:check}],
+      stops:res.stops, phase:'morning', view:'route', start:state.start||'ofakim', counts:state.counts, memory:state.memory});
+    photos={}; savePhotos();
     save(); render(); window.scrollTo(0,0);
     toast(check.ok ? 'היומן נקרא: '+check.count+' הזמנות' : 'היומן נקרא, אבל יש אי־התאמה — בדוק למטה');
   }catch(e){
@@ -481,7 +595,7 @@ async function autoRoute(fromHere){
   prog(0);
   try{
     var start=await startPoint(fromHere);
-    for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
+    for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; ps[i].pt=L.p||null; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
     var r=optimize(start, located);
     state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing);
     state.phase='route'; state.view='route'; save(); render(); window.scrollTo(0,0); wake();
@@ -492,12 +606,30 @@ async function autoRoute(fromHere){
   }
 }
 
+/* a hot order goes where it adds the least driving to what is left of the route */
+async function placeHot(s){
+  var arr=state.stops, ps=pending(), L=await locate(s); s.geoHow=L.how; s.pt=L.p||null;
+  if(!L.p){ arr.push(s); return 'לא נמצא במפה — נוספה בסוף הסבב'; }
+  for(var i=0;i<ps.length;i++){ if(ps[i].pt===undefined){ var l2=await locate(ps[i]); ps[i].pt=l2.p||null; } }
+  var origin=null; try{ var pos=await here(); origin=[pos.coords.latitude,pos.coords.longitude]; }catch(e){}
+  var pts=ps.filter(function(x){ return x.pt; });
+  if(!pts.length){ arr.push(s); return 'נוספה לסבב'; }
+  var best=Infinity, bk=pts.length;
+  for(var k=(origin?0:1); k<=pts.length; k++){
+    var prev = k===0 ? origin : pts[k-1].pt, next = k<pts.length ? pts[k].pt : null;
+    var cost = dist(prev,L.p) + (next ? dist(L.p,next)-dist(prev,next) : 0);
+    if(cost<best){ best=cost; bk=k; }
+  }
+  if(bk<pts.length) arr.splice(arr.indexOf(pts[bk]),0,s); else arr.splice(arr.indexOf(pts[pts.length-1])+1,0,s);
+  return bk===0 ? 'היא העצירה הבאה — הכי קרובה אליך' : 'נכנסה אחרי '+pts[bk-1].name;
+}
+
 /* ================= pieces ================= */
 function firstName(){ return (state.driver||'').split(' ')[0] || ''; }
 function topbar(){
   var d=done().length, n=state.stops.length, t=cashTotals();
   return (state.source==='sample' ? '<div class="demo">יומן לדוגמה · הנתונים מומצאים. ייבא את היומן שלך מבש״ן כדי להתחיל.</div>' : '')+
-  '<header class="topbar"><div class="row"><span class="j">יומן '+esc(state.journal)+(state.date?' · '+esc(state.date):'')+' · '+esc(state.driver)+'</span>'+
+  '<header class="topbar"><div class="row"><span class="j">יומן '+esc(state.journal)+(state.journals.length>1?' +'+(state.journals.length-1):'')+' · '+esc(state.day||state.date)+' · '+esc(state.driver)+'</span>'+
   '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
   '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></div>'+
   '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div></header>';
@@ -521,6 +653,15 @@ function listTag(s){
     (s.hot?' <span class="tag t-acc">חמה</span>':'')+(s.cityGuess?' <span class="tag t-warn">יישוב משוער</span>':'')+
     ((s.geoHow==='רחוב'||s.geoHow==='יישוב')?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
 }
+function custNo(s){ return s.cust && !/^hot-/.test(s.cust) ? s.cust : ''; }
+function actsHtml(c){
+  var mem=state.memory[c.cust]||{}, cts=contacts(c), mob=cts.filter(function(x){ return /^05/.test(x.num); })[0];
+  return '<div class="acts">'+
+    '<a class="act waze" href="'+(mem.lat ? 'https://waze.com/ul?ll='+mem.lat+','+mem.lon+'&navigate=yes' : 'https://waze.com/ul?q='+encodeURIComponent(navQ(c))+'&navigate=yes')+'" target="_blank" rel="noopener"><b>🧭</b>Waze'+(mem.lat?' · חנייה':'')+'</a>'+
+    '<button class="act" type="button" data-sheet="call" data-preset="'+esc(c.id)+'"><b>📞</b>חיוג</button>'+
+    (mob?'<a class="act" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
+  '</div>';
+}
 function pills(s){ return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
 
 /* ================= screens ================= */
@@ -543,7 +684,8 @@ function viewMorning(){
   '<div class="kpi"><span class="v num">'+q['1']+'</span><span class="k">בלונים 12 ק״ג</span></div>'+
   '<div class="kpi"><span class="v num">'+q['2']+'</span><span class="k">בלונים 48 ק״ג'+(other?' · +'+other+' אחר':'')+'</span></div></div>'+
   '<label class="filebtn big">📄 ייבוא יומן מבש״ן (PDF)<input type="file" id="imp" accept=".pdf,application/pdf"></label>'+
-  '<p class="hint">בוחרים את ה־PDF של ״דוח הזמנות לפי יומן״. הקובץ נקרא בטלפון ולא נשלח לשום מקום.</p>'+
+  (state.source==='pdf'?'<label class="filebtn">➕ הוסף יומן נוסף לאותו יום<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>':'')+
+  '<p class="hint">בוחרים את ה־PDF של ״דוח הזמנות לפי יומן״. הקובץ נקרא בטלפון ולא נשלח לשום מקום. יומן ראשון מחליף את הדוגמה; ״הוסף יומן״ מצרף עוד יומן לאותו יום.</p>'+
   (pdfReady===true ? '<p class="hint" style="color:var(--ok);font-weight:800">✓ קורא ה־PDF מוכן</p>'
    : pdfReady===false ? '<p class="err">⚠ קורא ה־PDF לא נטען. צריך קליטה — רענן את הדף ונסה שוב.</p>'
    : '<p class="hint">בודק את קורא ה־PDF…</p>')+'</section>'+
@@ -559,6 +701,7 @@ function viewMorning(){
   '<button class="btn btn-accent" id="goAuto" type="button">🧭 סדר הליכה אוטומטי</button>'+
   '<div class="grid2"><button class="btn btn-ghost btn-sm" id="goManual" type="button">✋ אני אסדר</button><button class="btn btn-ghost btn-sm" id="goRoute" type="button">לפי יישוב</button></div>'+
   '<p class="hint center">הסידור האוטומטי שולח למפה (OpenStreetMap) רק כתובות — בלי שמות וטלפונים.</p>'+
+  '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '</main>';
 }
 function viewRoute(){
@@ -571,24 +714,26 @@ function viewRoute(){
     out+='<section class="card next" aria-label="העצירה הבאה">'+
       '<span class="eyebrow">העצירה הבאה · '+(d.length+1)+' מתוך '+state.stops.length+(c.hot?' · הזמנה חמה':'')+(c.id && !c.hot?' · הזמנה '+esc(c.id):'')+'</span>'+
       '<div class="name">'+esc(c.name)+'</div>'+
+      (custNo(c)||c.fromJournal ? '<div class="custline num">'+(custNo(c)?'צרכן <b>'+esc(custNo(c))+'</b>':'')+(c.fromJournal?' · <span class="tag t-warn">מיומן '+esc(c.fromJournal)+'</span>':'')+'</div>' : '')+
       '<div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+(c.cityGuess?' ?':'')+'</span></div>'+
       badge(c)+pills(c)+
       (c.note?'<div class="note">📝 '+esc(c.note)+'</div>':'')+
       ((mem.parking||mp||mem.lat)?'<div class="mem"><b>📍 מהפעם הקודמת</b>'+(mem.lat?'<span>מיקום חנייה שמור — Waze ינווט אליו</span>':'')+(mem.parking?'<span>'+esc(mem.parking)+'</span>':'')+(mp?'<img src="'+mp+'" alt="עמדת הבלונים של הלקוח">':'')+'</div>':'')+
-      '<div class="acts">'+
-        '<a class="act waze" href="'+(mem.lat ? 'https://waze.com/ul?ll='+mem.lat+','+mem.lon+'&navigate=yes' : 'https://waze.com/ul?q='+encodeURIComponent(navQ(c))+'&navigate=yes')+'" target="_blank" rel="noopener"><b>🧭</b>Waze'+(mem.lat?' · חנייה':'')+'</a>'+
-        '<button class="act" type="button" data-sheet="call"><b>📞</b>חיוג</button>'+
-        (mob?'<a class="act" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
-      '</div>'+
+      actsHtml(c)+
       '<div class="go"><button class="btn btn-ok" type="button" data-sheet="deliver">✓ סופק</button><button class="btn btn-bad" type="button" data-sheet="fail">✕ לא סופק</button></div>'+
+      (p[1] ? '<button class="linkish" type="button" data-sheet="peek" data-preset="'+esc(p[1].id)+'">הבא בתור: <b>'+esc(p[1].name)+'</b> · הודעה / חיוג / Waze ←</button>' : '')+
     '</section>';
   }
   if(p.length>1){
     out+='<section><div class="sec"><h3>הבאים בתור · <span class="muted num">'+(p.length-1)+'</span></h3><span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" id="reAuto">🧭 מכאן</button><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" data-sheet="order">✋ ידני</button></span></div><div class="list">'+
     p.slice(1).map(function(s,i){
-      return '<div class="li"><span class="n num">'+(d.length+i+2)+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div><div style="margin-top:4px">'+listTag(s)+'</div></div>'+
-      '<div class="ctl"><button class="ic" type="button" data-mv="'+s.id+'" data-d="-1" aria-label="הקדם את '+esc(s.name)+'">▲</button><button class="ic" type="button" data-mv="'+s.id+'" data-d="1" aria-label="דחה את '+esc(s.name)+'">▼</button><button class="ic" type="button" data-first="'+s.id+'" aria-label="עבור עכשיו ל'+esc(s.name)+'">⤒</button></div></div>';
-    }).join('')+'</div></section>';
+      return '<div class="li li-q"><span class="n num">'+(d.length+i+2)+'</span>'+
+      '<button class="li-main" type="button" data-sheet="peek" data-preset="'+esc(s.id)+'"><div class="t">'+esc(s.name)+'</div><div class="s">'+(custNo(s)?'<span class="num">'+esc(custNo(s))+'</span> · ':'')+esc(addr(s))+' · '+esc(s.city)+'</div><div style="margin-top:4px">'+listTag(s)+'</div></button>'+
+      '<div class="ctl"><button class="ic" type="button" data-first="'+s.id+'" aria-label="עבור עכשיו ל'+esc(s.name)+'">⤒</button><span class="drag" data-drag="'+esc(s.id)+'" role="button" aria-label="גרור כדי לשנות את המקום של '+esc(s.name)+'">⠿</span></div></div>';
+    }).join('')+'</div><p class="hint center" style="margin-top:8px">לחיצה על עצירה — הודעה, חיוג, Waze. גרירה מ־⠿ — שינוי הסדר.</p>'+
+    '<label class="filebtn" style="width:100%;margin-top:10px">➕ הוסף יומן נוסף (PDF)<input type="file" id="impAdd" accept=".pdf,application/pdf"></label></section>';
+  } else if(state.source==='pdf'){
+    out+='<label class="filebtn" style="width:100%">➕ הוסף יומן נוסף (PDF)<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>';
   }
   if(d.length){
     out+='<section><div class="sec"><h3>הושלמו · <span class="muted num">'+d.length+'</span></h3></div><div class="list">'+
@@ -603,7 +748,12 @@ function viewRoute(){
 }
 function viewStock(){
   return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+
-  '<button class="btn btn-accent" type="button" data-sheet="count">+ ספירה חדשה</button>'+countsList()+'</main>';
+  '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 העמסה במתקן</button></div>'+
+  (state.facility.length?'<section class="card"><h3>מתקן היום</h3>'+state.facility.map(function(f){
+    var ld=CF.map(function(x){ var d=(f.out[x.k]||0)-(f.inn[x.k]||0); return d?(d>0?'+':'')+d+' '+x.l:''; }).filter(Boolean).join(' · ');
+    return '<div class="sec" style="margin:0"><span><b class="num">'+esc(f.time)+'</b>'+(f.swap?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+' · '+esc(ld||'אין שינוי')+(f.pink?' · 📄':'')+'</span>'+
+      '<button class="btn btn-ghost btn-sm" style="min-height:36px" type="button" data-delfac="'+esc(f.id)+'">מחק</button></div>'; }).join('')+'</section>':'')+
+  countsList()+'</main>';
 }
 function viewCash(){
   var t=cashTotals(), rows=done().filter(function(s){ return s.result && s.result.payment && s.result.payment.method!=='none'; });
@@ -615,94 +765,340 @@ function viewCash(){
    '</tbody></table></div></section>':'<p class="muted center">עוד לא נגבה כסף בסבב הזה.</p>')+
   '</main>';
 }
+/* ================= end of day: report, printable form, archive =================
+   Every report function reads `state` and `photos`; withDay() lends them a closed day from the archive for a moment. */
+function todayStr(){ var d=new Date(); return ("0"+d.getDate()).slice(-2)+"/"+("0"+(d.getMonth()+1)).slice(-2)+"/"+d.getFullYear(); }
+function dayOf(){ return state.day||state.date; }
+function withDay(D, ph, fn){ var ks=state, kp=photos; state=D; photos=ph||{}; try{ return fn(); } finally { state=ks; photos=kp; } }
+function lastClose(){ try{ return JSON.parse(localStorage.getItem('gazgal-last-close')||'null'); }catch(e){ return null; } }
+function firstCount(point,moment){ return state.counts.filter(function(c){ return c.point===point && c.moment===moment; })[0]||null; }
+function payBucket(s){ var m=s.result && s.result.payment && s.result.payment.method; return m==='cash'?'cash':m==='cheque'?'cheque':'rcpt'; }
+function isoOf(d){ var m=/^(\d\d)\/(\d\d)\/(\d{4})$/.exec(d||''); return m ? m[3]+'-'+m[2]+'-'+m[1] : new Date().toISOString().slice(0,10); }
+function weekday(d){ var m=/^(\d\d)\/(\d\d)\/(\d{4})$/.exec(d||''); return m ? WEEKDAY[new Date(+m[3],+m[2]-1,+m[1]).getDay()] : ''; }
+function journalNos(){ return state.journals.length ? state.journals.map(function(j){ return j.no; }) : [state.journal]; }
 function report(){
   var del=state.stops.filter(function(s){ return s.status==='delivered'; }), fail=state.stops.filter(function(s){ return s.status==='failed'; });
   var by={collect:{q1:0,q2:0,sum:0,n:0}, paid:{q1:0,q2:0,sum:0,n:0}, credit:{q1:0,q2:0,sum:0,n:0}};
-  var q={1:0,2:0}, e={1:0,2:0};
-  del.forEach(function(s){ var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)]; b.n++;
-    s.items.forEach(function(i){ if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=(i.actual||0); q[i.code]+=(i.actual||0); } }); b.sum+=totalOf(s,true);
+  var q={1:0,2:0}, e={1:0,2:0}, pb={cash:{1:0,2:0}, cheque:{1:0,2:0}, rcpt:{1:0,2:0}}, amg={a5:0,a25:0}, kits=[];
+  del.forEach(function(s){ var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
+    s.items.forEach(function(i){ var a=i.actual||0;
+      if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=a; q[i.code]+=a; pb[bk][i.code]+=a; }
+      if(amg[i.code]!=null) amg[i.code]+=a;
+      if(isDep(i) && a) kits.push({s:s, kg:i.code==='dep1'?'12':'48', n:a}); });
+    b.sum+=totalOf(s,true);
     e[1]+=s.result.empties[1]||0; e[2]+=s.result.empties[2]||0; });
-  var base=lastCount('me','יציאה'), eve=lastCount('me','סוף יום');
-  var exp = base ? {gm:(base.v.gm||0)-q[2], km:(base.v.km||0)-q[1], gr:(base.v.gr||0)+e[2], kr:(base.v.kr||0)+e[1]} : null;
-  return { del:del, fail:fail, by:by, q:q, e:e, t:cashTotals(), base:base, eve:eve, exp:exp,
+  var open=firstCount('me','יציאה'), eve=lastCount('me','סוף יום');
+  var prev = state.prevEve!==undefined ? state.prevEve : (function(){ var lc=lastClose(); return lc && lc.date!==dayOf() ? lc : null; })();
+  /* each stop at the loading facility: what was on the truck coming in, and going out (maybe another truck) */
+  var fac=state.facility||[], moved={gm:0,km:0,gr:0,kr:0};
+  fac.forEach(function(f){ CF.forEach(function(x){ moved[x.k]+=((f.out||{})[x.k]||0)-((f.inn||{})[x.k]||0); }); });
+  var exp = open ? {gm:(open.v.gm||0)-q[2]+moved.gm, km:(open.v.km||0)-q[1]+moved.km, gr:(open.v.gr||0)+e[2]+moved.gr, kr:(open.v.kr||0)+e[1]+moved.kr} : null;
+  var nos=journalNos(), groups=nos.map(function(no){ return {no:no, stops:[]}; }), other={};
+  state.stops.forEach(function(s){
+    if(s.fromJournal){ (other[s.fromJournal]=other[s.fromJournal]||[]).push(s); return; }
+    var g=groups.filter(function(x){ return x.no===(s.journal||nos[0]); })[0]||groups[0]; g.stops.push(s); });
+  Object.keys(other).forEach(function(no){ groups.push({no:no, from:true, stops:other[no]}); });
+  groups.forEach(function(g){ g.stops.sort(function(a,b){ return (a.row||999)-(b.row||999); }); });
+  return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, t:cashTotals(), open:open, base:open, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
     LBL:{collect:'באספקה (נגבה בשטח)', paid:'שולם מראש', credit:'אשראי / הוראת קבע'},
-    hot:state.stops.filter(function(s){ return s.hot; }), open:pending() };
+    hot:state.stops.filter(function(s){ return s.hot; }), openStops:pending(), changed:del.filter(changed),
+    transfers:state.stops.filter(function(s){ return s.fromJournal; }) };
 }
 function reportText(R){
   var L=[];
-  L.push('דוח סגירה — יומן '+state.journal+(state.date?' · '+state.date:''));
+  L.push('דוח סגירה — יומן '+journalNos().join(' + ')+(dayOf()?' · '+dayOf():''));
   L.push('נהג: '+state.driver);
   L.push('');
-  L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]);
-  Object.keys(R.by).forEach(function(k){ var b=R.by[k]; if(b.n) L.push('• '+R.LBL[k]+': '+b.n+' עצירות · 12: '+b.q1+' · 48: '+b.q2+' · '+money(b.sum)); });
+  L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]+(R.amg.a5?' · אמגזית 5: '+R.amg.a5:'')+(R.amg.a25?' · אמגזית 2.5: '+R.amg.a25:''));
+  L.push('לפי תשלום (12/48): מזומן '+R.pb.cash[1]+'/'+R.pb.cash[2]+' · שיקים '+R.pb.cheque[1]+'/'+R.pb.cheque[2]+' · קבלות '+R.pb.rcpt[1]+'/'+R.pb.rcpt[2]);
+  if(R.groups.length>1) R.groups.forEach(function(g){ var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length; L.push('• '+(g.from?'מיומן '+g.no+' (למשוך)':'יומן '+g.no)+': '+d+'/'+g.stops.length+' סופקו'); });
   L.push('');
   L.push('קופה למסירה: '+money(R.t.cash+R.t.cheque)+' (מזומן '+money(R.t.cash)+' · צ׳קים '+money(R.t.cheque)+' ב־'+R.t.nq+' צ׳קים)');
   R.del.filter(function(s){ return s.result.payment.method==='cheque'; }).forEach(function(s){ L.push('  • צ׳ק — '+s.name+' · '+money(s.result.payment.amount)+' · '+payDetail(s).replace(/^צ׳ק ?/,'')); });
   if(R.t.office) L.push('אשראי דרך המשרד: '+money(R.t.office));
   if(R.t.prepaid) L.push('לפי הנהג שולם מראש: '+money(R.t.prepaid)+' — '+R.del.filter(function(s){ return s.result.payment.method==='prepaid'; }).map(function(s){ return s.name; }).join(', '));
   if(R.t.unpaid) L.push('⚠ סופק ולא שולם: '+money(R.t.unpaid)+' — '+R.del.filter(function(s){ return s.result.payment.method==='unpaid'; }).map(function(s){ return s.name; }).join(', '));
-  if(R.fail.length){ L.push(''); L.push('לא סופקו:'); R.fail.forEach(function(s){ L.push('• '+s.name+' — '+s.result.reason+(s.result.text?' ('+s.result.text+')':'')); }); }
-  if(R.open.length){ L.push(''); L.push('לא טופלו: '+R.open.map(function(s){ return s.name; }).join(', ')); }
-  if(R.hot.length){ L.push(''); L.push('הזמנות חמות שנוספו: '+R.hot.map(function(s){ return s.name+' ('+addr(s)+', '+s.city+')'; }).join(' · ')); }
+  if(R.kits.length){ L.push(''); L.push('קומפלטים: '+R.kits.map(function(k){ return k.s.name+' '+k.n+'×'+k.kg; }).join(' · ')); }
+  if(R.changed.length){ L.push(''); L.push('שינויים מההזמנה:'); R.changed.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+deliveredText(s)+(s.officeNote?' ('+s.officeNote+')':'')); }); }
+  var notes=R.del.filter(function(s){ return s.officeNote && !changed(s); });
+  if(notes.length){ L.push(''); L.push('הערות למשרד:'); notes.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+s.officeNote); }); }
+  if(R.fail.length){ L.push(''); L.push('לא סופקו:'); R.fail.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+s.result.reason+(s.result.text?' ('+s.result.text+')':'')); }); }
+  if(R.openStops.length){ L.push(''); L.push('לא טופלו: '+R.openStops.map(function(s){ return s.name; }).join(', ')); }
+  if(R.transfers.length){ L.push(''); L.push('למשוך מיומנים אחרים: '+R.transfers.map(function(s){ return (s.orderNo||s.id)+' מיומן '+s.fromJournal; }).join(' · ')); }
   if(R.exp && R.eve){ L.push(''); L.push('מלאי משאית — צפוי / נספר בסוף יום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]+'/'+(R.eve.v[f.k]||0); }).join(' · ')); }
-  if(state.counts.length){ L.push(''); L.push('ספירות היום: '+state.counts.map(function(c){ return pointName(c)+' '+c.moment+' ('+c.time+')'; }).join(' · ')); }
+  if(state.dayNote){ L.push(''); L.push('הערות: '+state.dayNote); }
   return L.join('\n');
 }
+function deliveredText(s){ return s.items.filter(function(i){ return i.actual; }).map(function(i){ return i.actual+'×'+itemLabel(i); }).join(', ') || '—'; }
+function orderedText(s){ return s.items.filter(function(i){ return i.qty; }).map(function(i){ return i.qty+'×'+itemLabel(i); }).join(', ') || '—'; }
 function cmp(exp,got){ return exp===got ? '<span class="match num">'+got+' ✓</span>' : '<span class="mismatch num">'+got+' (צפוי '+exp+')</span>'; }
+
+/* ---------- the printable report: page 1 = the office's "דו״ח נהג יומי" form, filled in; then the orders appendix ---------- */
+function n2(v){ return v==null ? '' : String(v); }
+function docHead(title){
+  return '<div class="hdr"><h1>'+title+'</h1><div class="f">שם הנהג: <b>'+esc(state.driver)+'</b></div><div class="f">יום: <b>'+esc(weekday(dayOf()))+'</b></div>'+
+    '<div class="f">תאריך: <b>'+esc(dayOf())+'</b></div><div class="f">יומן: <b>'+esc(journalNos().join(' + '))+'</b></div></div>';
+}
+function pair(label,a,b,strong){ return '<tr><td class="lbl2">'+label+'</td><td class="num'+(strong?' big2':'')+'">'+n2(a)+'</td><td class="num'+(strong?' big2':'')+'">'+n2(b)+'</td></tr>'; }
+function pairHead(){ return '<tr><td class="lbl2"></td><th>12 ק״ג</th><th>48 ק״ג</th></tr>'; }
+function docHtml(){
+  var R=report(), o=R.open&&R.open.v||{}, ev=R.eve&&R.eve.v||null, pv=R.prev&&R.prev.v||null;
+  var p1='<div class="paper">'+docHead('דוח נהג יומי')+
+    '<div class="row2"><table>'+pairHead()+pair('יתרות גז מיום קודם:', pv?pv.km||0:'', pv?pv.gm||0:'')+pair('יתרות מיכלים ריקים מיום קודם:', pv?pv.kr||0:'', pv?pv.gr||0:'')+'</table>'+
+    (pv?'':'<div style="font-size:11.5px;color:#444;max-width:200px">אין סגירה קודמת באפליקציה — למלא ביד.</div>')+'</div>'+
+    '<div><b>האם הייתה העמסה במתקן:</b> '+(R.fac.length?'<b>כן</b> ('+R.fac.length+(R.fac.some(function(f){ return f.pink; })?', טופס ורוד צולם':'')+')':'לא')+'.  אם כן, יש לצרף טופס ורוד.</div>'+
+    '<div class="sec2">פירוט פריקה / העמסה ברמפה ובמתקן</div>'+facLines(R)+
+    '<div class="sec2">מכירה של קומפלטים</div>'+
+    '<table class="wide"><thead><tr><th>צרכן</th><th>שם</th><th>12/48 ק״ג</th><th>כמות</th><th>אופן תשלום</th><th>הערות</th></tr></thead><tbody>'+
+      (R.kits.length ? R.kits.map(function(k){ return '<tr><td class="c">'+esc(custNo(k.s))+'</td><td>'+esc(k.s.name)+'</td><td class="c">'+k.kg+'</td><td class="c">'+k.n+'</td><td>'+esc(k.s.result.payment.method==='none'?'—':PAY[k.s.result.payment.method])+'</td><td>'+esc(k.s.officeNote||'')+'</td></tr>'; }).join('')
+        : '<tr><td class="c" colspan="6">אין</td></tr>')+'</tbody></table>'+
+    '<div class="sec2">הערות נוספות</div>'+autoNotes(R)+
+    '<div class="row2" style="margin-top:14px">'+
+      '<div><div class="sec2" style="margin-top:0">מיכלים ריקים</div><table>'+pairHead()+pair('פתיחה:', R.open?o.kr||0:'', R.open?o.gr||0:'')+pair('סיום:', ev?ev.kr||0:'', ev?ev.gr||0:'')+'</table></div>'+
+      '<div><div class="sec2" style="margin-top:0">מכירת גז</div><table>'+pairHead()+pair('פתיחה:', R.open?o.km||0:'', R.open?o.gm||0:'')+pair('סיום:', ev?ev.km||0:'', ev?ev.gm||0:'')+pair('מכירה:', R.q[1], R.q[2], true)+'</table></div>'+
+    '</div>'+
+    (R.exp ? '<div style="margin:-2px 0 8px">'+recon(R)+'</div>' : '')+
+    '<div class="row2">'+
+      '<table>'+pairHead()+pair('שיקים', R.pb.cheque[1], R.pb.cheque[2])+pair('מזומן', R.pb.cash[1], R.pb.cash[2])+pair('קבלות', R.pb.rcpt[1], R.pb.rcpt[2])+'</table>'+
+      '<table>'+
+        '<tr><td class="lbl2">שיקים:</td><td class="big2" style="min-width:110px">'+money(R.t.cheque)+' <small>('+R.t.nq+')</small></td></tr>'+
+        '<tr><td class="lbl2">סה״כ מזומן שהתקבל:</td><td class="big2">'+money(R.t.cash)+'</td></tr>'+
+        '<tr><td class="lbl2">סה״כ מזומן שנמסר:</td><td style="height:26px"></td></tr>'+
+      '</table>'+
+    '</div>'+
+    '<div class="sig"><div>התקבל על ידי:</div><div>חתימה:</div><div>הדוח נסגר ע״י:</div><div>חתימת הנהג:</div></div>'+
+    '<div class="foot"><span>עמוד 1 — טופס</span><span>הופק באפליקציית הנהג · '+esc(stamp())+'</span></div>'+
+  '</div>';
+  var rows='';
+  R.groups.forEach(function(g){
+    var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length;
+    rows+='<tr class="grp"><td colspan="13">'+(g.from ? 'הזמנות מיומן '+esc(g.no)+' של נהג אחר — למשוך ליומן '+esc(state.journal) : 'יומן '+esc(g.no))+' · '+d+' מתוך '+g.stops.length+' סופקו</td></tr>';
+    g.stops.forEach(function(s){ rows+=orderRow(s); });
+  });
+  var p2='<div class="paper flow">'+docHead('נספח — פירוט הזמנות')+
+    '<table class="wide ord"><thead><tr><th rowspan="2">✓</th><th rowspan="2">שורה</th><th rowspan="2">הזמנה</th><th rowspan="2">צרכן</th><th rowspan="2">שם וכתובת</th><th colspan="2">הוזמן</th><th colspan="2">סופק</th><th colspan="2">ריקים</th><th rowspan="2">תשלום</th><th rowspan="2">הערה למשרד</th></tr>'+
+    '<tr><th>12</th><th>48</th><th>12</th><th>48</th><th>12</th><th>48</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div class="foot"><span class="pg"></span><span>✓ = לסימון הפקידה · מודגש = שונה מההזמנה</span></div></div>';
+  return p1+p2;
+}
+function stamp(){ var d=new Date(); return d.toLocaleDateString('he-IL')+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}); }
+function qtyOf(s,code,actual){ return s.items.filter(function(i){ return i.code===code; }).reduce(function(t,i){ return t+(actual?(i.actual||0):i.qty); },0); }
+function orderRow(s){
+  var r=s.result||{}, py=r.payment, dl=s.status==='delivered';
+  var cell=function(v,hot){ return '<td class="c num'+(hot?' chg':'')+'">'+(v||hot?v:'')+'</td>'; };
+  var sup = dl ? cell(qtyOf(s,'1',true), qtyOf(s,'1',true)!==qtyOf(s,'1',false))+cell(qtyOf(s,'2',true), qtyOf(s,'2',true)!==qtyOf(s,'2',false))
+    : '<td class="c" colspan="2"><b>'+(s.status==='failed'?'לא סופק':'לא טופל')+'</b></td>';
+  var emp = dl ? cell(r.empties[1])+cell(r.empties[2]) : '<td></td><td></td>';
+  var pay = !dl ? '' : py.method==='none' ? esc(mode(s)==='credit'?'אשראי':mode(s)==='standing'?'הו״ק':'שולם מראש') :
+    esc(PAY[py.method])+(py.method==='prepaid'?'':' '+money(py.amount))+(py.method==='cheque' && py.no?' · מס׳ '+esc(py.no):'')+(py.method==='cheque' && py.due?' · '+esc(fmtD(py.due)):'');
+  var extra = s.items.filter(function(i){ return i.code!=='1' && i.code!=='2' && (i.qty || (dl && i.actual)); })
+    .map(function(i){ return (i.qty?'הוזמן '+i.qty+' ':'')+(dl?'סופק '+(i.actual||0)+' ':'')+itemLabel(i); });
+  var note=[s.hot?'הזמנה חמה':'', s.fromJournal?'למשוך מיומן '+s.fromJournal:'', s.status==='failed'?r.reason+(r.text?' — '+r.text:''):'', extra.join(' · '), s.officeNote||''].filter(Boolean).join(' · ');
+  return '<tr'+(!dl?' class="warn2"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
+    '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(note)+'</td></tr>';
+}
+function facLines(R){
+  var L=[];
+  R.fac.forEach(function(f){
+    var ld=CF.map(function(x){ var d=((f.out||{})[x.k]||0)-((f.inn||{})[x.k]||0); return d ? (d>0?'+':'')+d+' '+x.l : ''; }).filter(Boolean).join(' · ');
+    L.push('מתקן '+esc(f.time)+(f.swap?' · הוחלפה משאית'+(f.truck?' ל־'+esc(f.truck):''):'')+(ld?' · '+esc(ld):'')+(f.note?' · '+esc(f.note):''));
+  });
+  state.counts.filter(function(c){ return c.point==='ramp'; }).forEach(function(c){ L.push('רמפה '+esc(c.moment)+' ('+esc(c.time)+'): '+esc(countLines(c).join(' · '))); });
+  return L.length ? '<ul>'+L.map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul>' : '<div>אין.</div>';
+}
+function autoNotes(R){
+  var L=[];
+  if(state.dayNote) L.push(esc(state.dayNote));
+  if(R.t.unpaid) L.push('<b>סופק ולא שולם: '+money(R.t.unpaid)+'</b> — '+esc(R.del.filter(function(s){ return s.result.payment.method==='unpaid'; }).map(function(s){ return s.name; }).join(', ')));
+  if(R.t.prepaid) L.push('לפי הנהג שולם מראש: '+money(R.t.prepaid));
+  if(R.t.office) L.push('אשראי דרך המשרד: '+money(R.t.office));
+  if(R.amg.a5||R.amg.a25) L.push('אמגזיות שסופקו: '+(R.amg.a5?R.amg.a5+'×5 ק״ג ':'')+(R.amg.a25?R.amg.a25+'×2.5 ק״ג':''));
+  if(R.fail.length) L.push('לא סופקו: '+R.fail.length+' (פירוט בנספח)');
+  if(R.openStops.length) L.push('<b>לא טופלו: '+R.openStops.length+'</b> (פירוט בנספח)');
+  if(R.changed.length) L.push('שינויים מההזמנה: '+R.changed.length+' (מודגשים בנספח)');
+  if(R.transfers.length) L.push('<b>למשוך מיומנים אחרים:</b> '+esc(R.transfers.map(function(s){ return (s.orderNo||s.name)+' מיומן '+s.fromJournal; }).join(' · ')));
+  if(R.groups.filter(function(g){ return !g.from; }).length>1) L.push('הסגירה מאחדת '+journalNos().length+' יומנים: '+esc(journalNos().join(', ')));
+  return L.length ? '<ul>'+L.map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul>' : '<div>אין.</div>';
+}
+function recon(R){
+  if(!R.eve) return '<span style="font-size:12px">צפוי על המשאית בסוף היום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]; }).join(' · ')+' (אין ספירת סוף יום)</span>';
+  var bad=CF.filter(function(f){ return R.exp[f.k]!==(R.eve.v[f.k]||0); });
+  return '<span style="font-size:12.5px">התאמה — צפוי מול נספר: '+CF.map(function(f){ var g=R.eve.v[f.k]||0; return f.l+' '+R.exp[f.k]+'/'+g; }).join(' · ')+' — '+
+    (bad.length ? '<span class="bad2">לא מתאים ('+bad.map(function(f){ return f.d; }).join(', ')+')</span>' : '<span class="ok2">✓ מתאים</span>')+'</span>';
+}
+/* split the appendix table over as many A4 pages as it needs, repeating the header */
+function paginate(root){
+  [].slice.call(root.querySelectorAll('.paper.flow')).forEach(function(pg){
+    var cur=pg, guard=0;
+    while(cur.scrollHeight>cur.clientHeight+1 && guard++<40){
+      var tb=cur.querySelector('tbody'); if(tb.children.length<2) break;
+      var nx=cur.cloneNode(true), ntb=nx.querySelector('tbody'); ntb.innerHTML='';
+      var foot=cur.querySelector('.foot'), limit=foot.getBoundingClientRect().top-6;
+      while(tb.children.length>1 && tb.lastElementChild.getBoundingClientRect().bottom>limit){ ntb.insertBefore(tb.lastElementChild, ntb.firstChild); }
+      if(!ntb.children.length) break;
+      cur.parentNode.insertBefore(nx, cur.nextSibling); cur=nx;
+    }
+  });
+  var all=root.querySelectorAll('.paper');
+  [].slice.call(all).forEach(function(p,i){ var pg=p.querySelector('.pg'); if(pg) pg.textContent='עמוד '+(i+1)+' מתוך '+all.length; });
+}
+
+/* ---------- screens ---------- */
+var docRec=null;       /* null = today's report; otherwise a closed day from the archive */
+function viewDoc(){
+  return '<main><div class="hero"><span class="eyebrow">'+(docRec?'דוח סגור':'דוח לפקידה')+'</span><h1>'+(docRec?esc(docRec.date)+' · יומן '+esc(docRec.journals.join(' + ')):'דוח נהג יומי')+'</h1></div>'+
+    '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" id="sharePdf">📤 שתף PDF</button><button class="btn btn-ghost btn-sm" type="button" id="printDoc">🖨️ הדפס</button></div>'+
+    '<a class="btn btn-ghost btn-sm linkbtn" id="waOffice" href="#" target="_blank" rel="noopener">💬 סיכום בטקסט לוואטסאפ של המשרד</a>'+
+    '<p class="hint">״שתף PDF״ פותח את השיתוף של הטלפון — בוחרים וואטסאפ ואת ״משרד״. ״הדפס״ — למדפסת או ״שמור כ־PDF״.</p>'+
+    '<div class="docwrap" id="docWrap"><div id="docPages"></div></div>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-view="'+(docRec?'history':'end')+'">חזרה</button></main>';
+}
+function docSource(fn){ return docRec ? withDay(docRec.day, docRec.photos, fn) : fn(); }
+function layoutDoc(){
+  var box=document.getElementById('docPages'); if(!box) return;
+  box.innerHTML=docSource(docHtml);
+  paginate(box);
+  var k=Math.min(1,(document.getElementById('app').clientWidth-32)/794);
+  box.style.zoom=k;
+  var wa=document.getElementById('waOffice'); if(wa) wa.href='https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(docSource(function(){ return reportText(report()); }));
+}
+function loadScript(src){ return new Promise(function(res,rej){ if(document.querySelector('script[src="'+src+'"]')) return res(); var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+function printPages(){
+  /* full-size copy of the pages outside the app, for print and for the PDF */
+  var pr=document.getElementById('printRoot'); pr.innerHTML=docSource(docHtml);
+  pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px'; paginate(pr); pr.style.cssText='';
+  return pr;
+}
+async function sharePdf(){
+  var btn=document.getElementById('sharePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
+  try{
+    await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
+    var pr=printPages(); pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
+    var pdf=new window.jspdf.jsPDF({unit:'mm', format:'a4', compress:true}), pages=pr.querySelectorAll('.paper');
+    for(var i=0;i<pages.length;i++){
+      var cv=await window.html2canvas(pages[i],{scale:2, backgroundColor:'#ffffff', logging:false});
+      if(i) pdf.addPage();
+      pdf.addImage(cv.toDataURL('image/jpeg',0.85),'JPEG',0,0,210,297);
+    }
+    pr.style.cssText=''; pr.innerHTML='';
+    var D=docRec?docRec.day:state, name='דוח-נהג-'+isoOf(D.day||D.date)+'-יומן-'+(D.journal||'')+'.pdf';
+    var file=new File([pdf.output('blob')], name, {type:'application/pdf'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
+    } else {
+      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+      toast('ה־PDF ירד לטלפון. שלח אותו מהקבצים.');
+    }
+  }catch(e){ toast('לא הצלחתי להכין PDF. נסה ״הדפס״ ← ״שמור כ־PDF״.'); try{ console.error(e); }catch(_){} }
+  btn.disabled=false; btn.textContent='📤 שתף PDF';
+}
 function viewEnd(){
   var R=report();
-  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>סגירת יומן '+esc(state.journal)+'</h1></div>'+
-  (R.open.length?'<div class="note">נשארו '+R.open.length+' עצירות פתוחות. אפשר לסגור בכל זאת, והן יופיעו בדוח כ״לא טופלו״.</div>':'')+
+  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>סגירת יומן '+esc(journalNos().join(' + '))+'</h1></div>'+
+  (R.openStops.length?'<div class="note">נשארו '+R.openStops.length+' עצירות פתוחות. אפשר לסגור בכל זאת, והן יופיעו בדוח כ״לא טופלו״.</div>':'')+
   '<section class="card"><div class="sec" style="margin:0"><h3>ספירת סוף יום — המשאית</h3>'+(R.eve?'<span class="tag t-ok num">'+esc(R.eve.time)+'</span>':'')+'</div>'+
   (R.eve?'<div class="msg">'+esc(countLines(R.eve).join('\n'))+'</div>':'<p class="hint">עוד לא נספר.</p>')+
   '<button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|סוף יום">'+(R.eve?'ספור שוב':'ספור עכשיו')+'</button></section>'+
-  '<section class="card report"><div class="sec" style="margin:0"><h3>דוח סגירה למשרד</h3><span class="tag t-ok num">'+R.del.length+'/'+state.stops.length+' סופקו</span></div>'+
-  '<div class="tbl"><table><thead><tr><th>סוג</th><th class="v">עצירות</th><th class="v">12</th><th class="v">48</th><th class="v">סכום</th></tr></thead><tbody>'+
-  Object.keys(R.by).map(function(k){ var b=R.by[k]; return '<tr><td>'+R.LBL[k]+'</td><td class="v num">'+b.n+'</td><td class="v num">'+b.q1+'</td><td class="v num">'+b.q2+'</td><td class="v num">'+money(b.sum)+'</td></tr>'; }).join('')+
-  '<tr><th>סה״כ</th><th class="v num">'+R.del.length+'</th><th class="v num">'+R.q[1]+'</th><th class="v num">'+R.q[2]+'</th><th class="v"></th></tr></tbody></table></div>'+
+  '<section class="card report"><div class="sec" style="margin:0"><h3>סיכום</h3><span class="tag t-ok num">'+R.del.length+'/'+state.stops.length+' סופקו</span></div>'+
+  '<div class="tbl"><table><thead><tr><th>לפי תשלום</th><th class="v">12</th><th class="v">48</th></tr></thead><tbody>'+
+    [['מזומן','cash'],['שיקים','cheque'],['קבלות (כל השאר)','rcpt']].map(function(x){ return '<tr><td>'+x[0]+'</td><td class="v num">'+R.pb[x[1]][1]+'</td><td class="v num">'+R.pb[x[1]][2]+'</td></tr>'; }).join('')+
+    '<tr><th>מכירה</th><th class="v num">'+R.q[1]+'</th><th class="v num">'+R.q[2]+'</th></tr></tbody></table></div>'+
   '<div class="sum"><span>קופה למסירה</span><span class="big num">'+money(R.t.cash+R.t.cheque)+'</span></div>'+
   '<div class="muted">מזומן '+money(R.t.cash)+' · צ׳קים '+money(R.t.cheque)+' ('+R.t.nq+')'+(R.t.office?' · אשראי דרך המשרד '+money(R.t.office):'')+(R.t.prepaid?' · שולם מראש לפי הנהג '+money(R.t.prepaid):'')+'</div>'+
   (R.t.unpaid?'<div class="note">⚠ סופק ולא שולם: '+money(R.t.unpaid)+'</div>':'')+
-  (R.fail.length?'<div><b>לא סופקו</b><ul style="margin:6px 0 0;padding-inline-start:18px">'+R.fail.map(function(s){ return '<li>'+esc(s.name)+' — '+esc(s.result.reason)+(s.result.text?' ('+esc(s.result.text)+')':'')+'</li>'; }).join('')+'</ul></div>':'')+
-  (R.hot.length?'<div><b>הזמנות חמות:</b> '+R.hot.map(function(s){ return esc(s.name); }).join(', ')+'</div>':'')+
+  (R.groups.length>1?'<div>'+R.groups.map(function(g){ var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length; return '<span class="tag t-info num" style="margin-inline-end:6px">'+(g.from?'מיומן '+esc(g.no):'יומן '+esc(g.no))+' · '+d+'/'+g.stops.length+'</span>'; }).join('')+'</div>':'')+
   '<div><b>התאמת מלאי — המשאית</b>'+
   (R.exp && R.eve
     ? '<div class="tbl"><table><tbody>'+CF.map(function(f){ return '<tr><td>'+f.d+' ('+f.l+')</td><td class="v">'+cmp(R.exp[f.k], R.eve.v[f.k]||0)+'</td></tr>'; }).join('')+'</tbody></table></div>'+
-      '<p class="hint">צפוי = ספירת ה״יציאה״ של הבוקר, פחות מלאים שסופקו, ועוד ריקים שנאספו.</p>'
-    : '<p class="hint">'+(!R.base?'חסרה ספירת ״יציאה״ של המשאית מהבוקר, אז אין ממה לחשב.':'חסרה ספירת סוף יום של המשאית.')+'</p>')+
+      '<p class="hint">צפוי = ספירת ה״יציאה״ של הבוקר, פחות מלאים שנמכרו, ועוד ריקים שנאספו'+(R.fac.length?', ועוד מה שהועמס/נפרק במתקן':'')+'.</p>'
+    : '<p class="hint">'+(!R.open?'חסרה ספירת ״יציאה״ של המשאית מהבוקר, אז אין ממה לחשב.':'חסרה ספירת סוף יום של המשאית.')+'</p>')+
   '</div>'+
-  '<button class="btn btn-accent btn-sm" type="button" id="copyRep">העתק את הדוח לוואטסאפ</button>'+
-  '<a class="btn btn-ghost btn-sm linkbtn" id="waRep" href="https://wa.me/?text='+encodeURIComponent(reportText(R))+'" target="_blank" rel="noopener">שלח בוואטסאפ</a>'+
-  '<textarea class="inp" id="repText" readonly hidden aria-label="טקסט הדוח"></textarea>'+
+  '<div class="field"><label for="dayNote">הערות נוספות לדוח</label><textarea class="inp" id="dayNote" placeholder="נכנס ל״הערות נוספות״ בטופס">'+esc(state.dayNote||'')+'</textarea></div>'+
   '</section>'+
-  '<button class="btn btn-ghost btn-sm" type="button" data-sheet="reset">התחל יום חדש</button>'+
+  '<button class="btn btn-accent" type="button" data-view="doc">📄 הדוח לפקידה — PDF / הדפסה</button>'+
+  (state.source==='pdf'?'<button class="btn btn-ok" type="button" data-sheet="close">🔒 סגור יום ושמור בארכיון</button>':'<button class="btn btn-ghost btn-sm" type="button" data-sheet="close">התחל יום חדש</button>')+
+  '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '</main>';
 }
+
+/* ---------- closing the day into the archive (on the phone, 90 days) ---------- */
+function dayIndex(){ return idbGet('kv','dayIndex').then(function(x){ return x||[]; }); }
+async function closeDay(){
+  var mem=state.memory, start=state.start;
+  if(state.source==='pdf'){
+    var R=report(), id=isoOf(dayOf())+'-'+state.journal;
+    var snap=JSON.parse(JSON.stringify(state)); delete snap.memory; snap.prevEve=R.prev||null; snap.closedAt=new Date().toISOString();
+    var ph={}; Object.keys(photos).forEach(function(k){ ph[k]=photos[k]; });
+    var summ={id:id, iso:isoOf(dayOf()), date:dayOf(), journals:journalNos(), driver:state.driver, del:R.del.length, n:state.stops.length, cash:R.t.cash, cheque:R.t.cheque, closedAt:snap.closedAt};
+    await idbPut('days', id, {id:id, date:dayOf(), journals:summ.journals, day:snap, photos:ph});
+    var idx=(await dayIndex()).filter(function(x){ return x.id!==id; }); idx.push(summ);
+    var cut=new Date(Date.now()-KEEP_DAYS*864e5).toISOString().slice(0,10), old=idx.filter(function(x){ return x.iso<cut; });
+    for(var i=0;i<old.length;i++){ await idbDel('days', old[i].id); }
+    idx=idx.filter(function(x){ return x.iso>=cut; }).sort(function(a,b){ return a.id<b.id?1:-1; });
+    await idbPut('kv','dayIndex',idx);
+    if(R.eve){ try{ localStorage.setItem('gazgal-last-close', JSON.stringify({date:dayOf(), v:R.eve.v, journal:state.journal})); }catch(e){} }
+  }
+  state=migrate(fresh()); state.memory=mem; state.start=start; photos={}; savePhotos(); save();
+}
+function viewHistory(){
+  return '<main><div class="hero"><span class="eyebrow">ארכיון · '+KEEP_DAYS+' יום אחרונים</span><h1>דוחות קודמים</h1></div>'+
+    '<div id="histList"><div class="loading"><div class="spin"></div>טוען…</div></div>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-view="'+(state.phase==='morning'?'route':'end')+'">חזרה</button></main>';
+}
+function fillHistory(){
+  var box=document.getElementById('histList'); if(!box) return;
+  dayIndex().then(function(idx){
+    if(!idx.length){ box.innerHTML='<p class="muted center">עוד אין ימים סגורים. בסוף היום לוחצים ״סגור יום״ והדוח נשמר כאן.</p>'; return; }
+    box.innerHTML='<div class="list">'+idx.map(function(x){
+      return '<button type="button" class="li" data-openday="'+esc(x.id)+'"><span class="n">📄</span><div class="hist"><div class="t">'+esc(weekday(x.date))+' · '+esc(x.date)+'</div><span class="tag t-ok num">'+x.del+'/'+x.n+'</span>'+
+        '<div class="s">יומן '+esc(x.journals.join(' + '))+'</div><span class="s num">'+money(x.cash+x.cheque)+'</span></div><span></span></button>'; }).join('')+'</div>';
+  }).catch(function(){ box.innerHTML='<p class="err">לא הצלחתי לקרוא את הארכיון בטלפון הזה.</p>'; });
+}
 function navbar(){
-  var v = state.view==='stock' ? 'stock' : (state.phase==='morning' ? 'route' : state.view);
+  var v = state.view==='stock' ? 'stock' : (state.view==='doc'||state.view==='history') ? 'end' : (state.phase==='morning' ? 'route' : state.view);
   function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
   return (state.phase==='route' && v==='route' && cur() ? '<button class="fab" type="button" data-sheet="hot">+ הזמנה חמה</button>' : '')+
   '<nav class="nav" aria-label="ניווט"><div class="in">'+tab('route','🚚','סבב')+tab('stock','📦','מלאי')+tab('cash','💵','קופה')+tab('end','📋','סוף יום')+'</div></nav>';
 }
 function render(){
   var v=state.view;
-  var body = v==='stock' ? viewStock() : state.phase==='morning' ? viewMorning() : v==='cash' ? viewCash() : v==='end' ? viewEnd() : viewRoute();
+  var body = v==='stock' ? viewStock() : v==='history' ? viewHistory() : v==='doc' ? viewDoc() : state.phase==='morning' ? viewMorning() : v==='cash' ? viewCash() : v==='end' ? viewEnd() : viewRoute();
   document.getElementById('app').innerHTML = topbar()+body+navbar();
+  if(v==='doc') layoutDoc();
+  if(v==='history') fillHistory();
 }
 
 /* ================= sheets ================= */
 function ordered(s,code){ return s.items.filter(function(i){ return i.code===code; }).reduce(function(t,i){ return t+i.qty; },0); }
-function codesOf(c){ var cs=['1','2']; c.items.forEach(function(i){ if(cs.indexOf(i.code)<0) cs.push(i.code); }); return cs; }
-function labelFor(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; return ex ? itemLabel(ex) : (KG[code]+' ק״ג'); }
+function codesOf(c){ var cs=['1','2']; c.items.forEach(function(i){ if(cs.indexOf(i.code)<0) cs.push(i.code); }); (draft && draft.extra || []).forEach(function(k){ if(cs.indexOf(k)<0) cs.push(k); }); return cs; }
+function labelFor(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; return ex ? itemLabel(ex) : (ITEM_NAME[code]||code); }
+function dPrice(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; if(ex) return ex.price; return draft.price[code]!=null ? draft.price[code] : priceOf(code); }
 function dItems(c){
   var out=[];
   codesOf(c).forEach(function(code){ var ex=c.items.filter(function(i){ return i.code===code; })[0];
-    var qty=ex?ex.qty:0; if(qty || draft.q[code]) out.push({code:code, desc:ex?ex.desc:('מיכל '+KG[code]+' ק"ג'), qty:qty, price:ex?ex.price:PRICE[code], actual:draft.q[code]||0}); });
+    var qty=ex?ex.qty:0; if(qty || draft.q[code]) out.push({code:code, desc:ex?ex.desc:(ITEM_NAME[code]||code), qty:qty, price:dPrice(c,code), actual:draft.q[code]||0}); });
   return out;
 }
 function dAmount(c){ return totalOf({items:dItems(c), discGross:c.discGross}, true); }
+function dItemsHtml(c){
+  var codes=codesOf(c), gas=codes.filter(function(k){ return !/^dep/.test(k); }), dep=codes.filter(function(k){ return /^dep/.test(k); });
+  var add=ADDABLE.filter(function(k){ return codes.indexOf(k)<0; }).concat(['dep1','dep2'].filter(function(k){ return codes.indexOf(k)<0; }));
+  return '<div class="steps">'+gas.map(function(code){
+      var ord=ordered(c,code), s=stepper('q-'+code, draft.q[code]||0, esc(labelFor(c,code)), (ord || KG[code]) ? 'בהזמנה: '+ord : 'נוסף בשטח');
+      if(PRICE[code]==null && !c.items.some(function(i){ return i.code===code; }))
+        s+='<div class="step"><label class="l" for="pr-'+code+'">מחיר ליחידה<small>כולל מע״מ · נשמר לפעם הבאה</small></label><input class="inp num" style="width:110px" id="pr-'+code+'" data-price="'+code+'" inputmode="decimal" value="'+(dPrice(c,code)||'')+'"></div>';
+      return s; }).join('')+
+    dep.map(function(code){ return stepper('q-'+code, draft.q[code]||0, esc(ITEM_NAME[code]), 'מיכל חדש + פיקדון '+money(PRICE[code])+' ליחידה'); }).join('')+'</div>'+
+    (add.length?'<div class="chips" style="margin-top:8px">'+add.map(function(k){ return '<button type="button" class="chip" data-additem="'+k+'">+ '+esc(/^dep/.test(k)?'קומפלט '+(k==='dep1'?'12':'48'):ITEM_NAME[k])+'</button>'; }).join('')+'</div>':'')+
+    '<p class="hint">סופק משהו אחר מההזמנה? הורד ל־0 את מה שלא סופק והוסף את מה שכן. השינוי יסומן לפקידה בדוח.</p>';
+}
+function refreshAmt(){
+  var c=draft && draft.stop && byId(draft.stop); if(!c) return;
+  var a=document.getElementById('dAmt'); if(a) a.textContent=money(dAmount(c));
+  var ca=document.getElementById('chqAmt'); if(ca) ca.value=dAmount(c);
+}
 function openSheet(kind,preset){
-  var c=cur(), html='';
+  var c=(preset && byId(preset)) || cur(), html='';
   if(kind==='count'){
     var pr=(preset||'').split('|'), pt=pr[0]||'me', mo=pr[1]||nextMoment(pt);
     draft={point:pt, pointText:'', moment:mo, v:{}};
@@ -729,6 +1125,32 @@ function openSheet(kind,preset){
     pending().map(function(s){ return '<button type="button" class="li" data-ord="'+s.id+'"><span class="n num" id="ordn-'+s.id+'">·</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+esc(addr(s))+' · '+esc(s.city)+'</div></div><span>'+listTag(s)+'</span></button>'; }).join('')+
     '</div><button class="btn btn-accent" type="button" id="applyOrder">החל את הסדר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
+  if(kind==='facility'){
+    draft={fac:{}, swap:false, pink:null};
+    var fgrid=function(p,title){ return '<div class="field"><span class="lbl">'+title+'</span><div class="cgrid"><span></span><span class="h">גדול · 48</span><span class="h">קטן · 12</span>'+
+      '<span class="r">מלא</span><input class="cin num" data-fac="'+p+'-gm" inputmode="numeric" aria-label="גדול מלא"><input class="cin num" data-fac="'+p+'-km" inputmode="numeric" aria-label="קטן מלא">'+
+      '<span class="r">ריק</span><input class="cin num" data-fac="'+p+'-gr" inputmode="numeric" aria-label="גדול ריק"><input class="cin num" data-fac="'+p+'-kr" inputmode="numeric" aria-label="קטן ריק"></div></div>'; };
+    html='<h2>🏭 העמסה במתקן</h2><p class="hint">סופרים את המשאית כשנכנסים למתקן, ושוב כשיוצאים (גם אם זו משאית אחרת). האפליקציה מחשבת כמה הועמס וכמה ריקים נפרקו, וממשיכה את ההתאמה מהספירה של היציאה.</p>'+
+      fgrid('i','1. נכנסתי למתקן עם')+
+      '<div class="field"><span class="lbl">2. החלפתי משאית?</span><div class="chips"><button type="button" class="chip" data-swap="0" aria-pressed="true">לא</button><button type="button" class="chip" data-swap="1" aria-pressed="false">כן</button></div>'+
+      '<input class="inp num" id="facTruck" placeholder="מספר המשאית החדשה" autocomplete="off" hidden></div>'+
+      fgrid('o','3. יצאתי מהמתקן עם')+
+      '<div class="field"><span class="lbl">4. הטופס הוורוד</span>'+photoPick('pink','צלם טופס')+'</div>'+
+      '<div class="field"><label for="facNote">הערה (לא חובה)</label><input class="inp" id="facNote" autocomplete="off"></div>'+
+      '<p class="err" id="facErr" hidden></p>'+
+      '<button class="btn btn-accent" type="button" id="saveFac">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='peek'){
+    var pk=c, pm=state.memory[pk.cust]||{};
+    html='<h2>'+esc(pk.name)+'</h2>'+
+      '<div class="addr">'+esc(addr(pk))+'<span class="city">'+esc(pk.city)+'</span></div>'+
+      (custNo(pk)?'<div class="custline num" style="margin:0">צרכן <b>'+esc(custNo(pk))+'</b>'+(pk.id && !pk.hot?' · הזמנה '+esc(pk.id):'')+'</div>':'')+
+      badge(pk)+pills(pk)+(pk.note?'<div class="note">📝 '+esc(pk.note)+'</div>':'')+(pm.parking?'<div class="mem"><b>📍 חנייה</b><span>'+esc(pm.parking)+'</span></div>':'')+
+      actsHtml(pk)+
+      '<button class="btn btn-accent btn-sm" type="button" data-first="'+esc(pk.id)+'">⤒ עבור עכשיו לעצירה הזו</button>'+
+      '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" data-sheet="deliver" data-preset="'+esc(pk.id)+'">✓ סופק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="fail" data-preset="'+esc(pk.id)+'">✕ לא סופק</button></div>'+
+      '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  }
   if(kind==='call'){
     html='<h2>חיוג — '+esc(c.name)+'</h2><div class="list">'+contacts(c).map(function(x){
       return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+'</div>'+
@@ -736,13 +1158,12 @@ function openSheet(kind,preset){
   }
   if(kind==='deliver'){
     var md=mode(c), mem=state.memory[c.cust]||{}, codes=codesOf(c);
-    draft={q:{}, e:{}, method:null, cheque:null, stand:null};
+    draft={stop:c.id, q:{}, e:{}, extra:[], price:{}, method:null, cheque:null, stand:null};
     codes.forEach(function(code){ draft.q[code]=ordered(c,code); });
     draft.e[1]=draft.q['1']; draft.e[2]=draft.q['2'];
     var payOpts = md==='verify' ? ['cash','cheque','office','prepaid','unpaid'] : ['cash','cheque','office','unpaid'];
     html='<h2>סופק — '+esc(c.name)+'</h2>'+
-    '<div class="field"><span class="lbl">כמה סופק בפועל</span><div class="steps">'+
-      codes.map(function(code){ return stepper('q-'+code, draft.q[code], esc(labelFor(c,code)), 'בהזמנה: '+ordered(c,code)); }).join('')+'</div></div>'+
+    '<div class="field"><span class="lbl">כמה סופק בפועל</span><div id="dItemsBox">'+dItemsHtml(c)+'</div></div>'+
     '<div class="field"><span class="lbl">ריקים שנאספו</span><div class="steps">'+stepper('e1',draft.e[1],'12 ק״ג')+stepper('e2',draft.e[2],'48 ק״ג')+'</div></div>'+
     (collects(c)
       ? '<div class="sum"><span>לגבות</span><span class="big num" id="dAmt">'+money(dAmount(c))+'</span></div>'+
@@ -752,18 +1173,19 @@ function openSheet(kind,preset){
         '<div id="chq" hidden class="field"><label for="chqAmt" class="lbl">סכום הצ׳ק</label><input class="inp num" id="chqAmt" inputmode="decimal" value="'+dAmount(c)+'">'+
         '<div class="grid2"><div class="field"><label for="chqNo" class="lbl">מספר צ׳ק (לא חובה)</label><input class="inp num" id="chqNo" inputmode="numeric" autocomplete="off"></div>'+
         '<div class="field"><label for="chqDue" class="lbl">לפירעון (לא חובה)</label><input class="inp num" id="chqDue" type="date"></div></div>'+
-        '<div class="photo"><label class="filebtn">📷 צילום הצ׳ק (לא חובה)<input type="file" id="chqIn" accept="image/*"></label><span id="chqPrev"></span></div>'+
+        '<span class="lbl">צילום הצ׳ק (לא חובה)</span>'+photoPick('cheque','צלם צ׳ק')+
         '<p class="hint">צילום עוזר לפקידה ומגן כשצ׳ק חוזר, אבל אפשר לאשר גם בלעדיו.</p></div>'
       : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
     '<div class="field"><span class="lbl">📍 מיקום חנייה</span><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(mem.lat?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
       '<p class="hint" id="gpsMsg">'+(mem.lat?'יש מיקום שמור מהפעם הקודמת.':'עומד בחנייה הנכונה? שמור, ובפעם הבאה Waze והסידור ישתמשו בו.')+'</p></div>'+
     '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(mem.parking||'')+'</textarea></div>'+
-    '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span><div class="photo"><label class="filebtn">📷 צלם את העמדה<input type="file" id="standIn" accept="image/*"></label><span id="standPrev"></span></div></div>'+
+    '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
+    '<div class="field"><label for="offNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="offNote" placeholder="מה שהיית כותב בעט על ההזמנה — נכנס לדוח לפקידה"></textarea></div>'+
     '<p class="err" id="dErr" hidden></p>'+
     '<button class="btn btn-ok" type="button" id="confirmDeliver">אישור אספקה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   if(kind==='fail'){
-    draft={reason:null};
+    draft={stop:c.id, reason:null};
     html='<h2>לא סופק — '+esc(c.name)+'</h2><div class="field"><span class="lbl">למה?</span><div class="chips" role="group" aria-label="סיבה">'+
     REASONS.map(function(r){ return '<button type="button" class="chip" data-reason="'+r+'" aria-pressed="false">'+r+'</button>'; }).join('')+'</div></div>'+
     '<div class="field"><label for="failTxt">פירוט</label><textarea class="inp" id="failTxt" placeholder="חובה רק ב״אחר״"></textarea></div>'+
@@ -771,22 +1193,32 @@ function openSheet(kind,preset){
     '<button class="btn btn-bad" type="button" id="confirmFail">סמן כלא סופק</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   if(kind==='hot'){
-    draft={q:{'1':0,'2':1}, pay:'collect', pos:'next'};
-    html='<h2>הזמנה חמה</h2><p class="hint">הזמנה שנכנסה תוך כדי סבב. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
+    draft={q:{'1':0,'2':1}, pay:'collect', pos:'map'};
+    html='<h2>הזמנה חמה</h2><p class="hint">הזמנה שנכנסה תוך כדי סבב, או הזמנה מודפסת שקיבלת מנהג אחר. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
     '<div class="field"><label for="hName">שם</label><input class="inp" id="hName" autocomplete="off"></div>'+
+    '<div class="grid2"><div class="field"><label for="hOrder">מס׳ הזמנה (אם יש)</label><input class="inp num" id="hOrder" inputmode="numeric" autocomplete="off"></div>'+
+    '<div class="field"><label for="hCust">מס׳ צרכן (אם יש)</label><input class="inp num" id="hCust" inputmode="numeric" autocomplete="off"></div></div>'+
+    '<div class="field"><label for="hJournal">מס׳ יומן שרשום על ההזמנה</label><input class="inp num" id="hJournal" inputmode="numeric" autocomplete="off" placeholder="ריק = היומן שלי ('+esc(state.journal)+')">'+
+    '<p class="hint">אם זה יומן של נהג אחר — הדוח יסמן לפקידה ״למשוך מיומן ___״.</p></div>'+
     '<div class="field"><label for="hPhone">טלפון</label><input class="inp num" id="hPhone" inputmode="tel" autocomplete="off"></div>'+
     '<div class="grid2"><div class="field"><label for="hStreet">רחוב</label><input class="inp" id="hStreet" autocomplete="off"></div><div class="field"><label for="hHouse">מספר</label><input class="inp num" id="hHouse" inputmode="numeric" autocomplete="off"></div></div>'+
     '<div class="field"><label for="hCity">יישוב</label><input class="inp" id="hCity" autocomplete="off" value="'+esc(c?c.city:'')+'"></div>'+
     '<div class="steps">'+stepper('h1',0,'12 ק״ג')+stepper('h2',1,'48 ק״ג')+'</div>'+
     '<div class="sum"><span>סכום</span><span class="big num" id="hAmt">'+money(PRICE['2'])+'</span></div>'+
     '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['collect','לגבות במקום'],['paid','שולם כבר'],['credit','לקוח אשראי']].map(function(x){ return '<button type="button" class="chip" data-hpay="'+x[0]+'" aria-pressed="'+(x[0]==='collect')+'">'+x[1]+'</button>'; }).join('')+'</div></div>'+
-    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='next')+'">'+x[1]+'</button>'; }).join('')+'</div></div>'+
+    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['map','איפה שהכי קרוב במסלול'],['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='map')+'">'+x[1]+'</button>'; }).join('')+'</div></div>'+
     '<p class="err" id="hErr" hidden></p>'+
     '<button class="btn btn-accent" type="button" id="confirmHot">הוסף לסבב</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
-  if(kind==='reset'){
-    html='<h2>להתחיל יום חדש?</h2><p style="margin:0">הסימונים של היום והספירות יימחקו. הערות החנייה נשמרות. אחרי זה מייבאים את היומן של מחר.</p>'+
-    '<button class="btn btn-bad" type="button" id="confirmReset">כן, התחל יום חדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  if(kind==='close' || kind==='reset'){
+    var real=state.source==='pdf', op=pending().length;
+    html= real
+      ? '<h2>לסגור את היום?</h2><p style="margin:0">הדוח של היום נשמר ב״דוחות קודמים״ ('+KEEP_DAYS+' יום), וספירת סוף היום תהיה ״יתרות מיום קודם״ בדוח של מחר. אחרי זה מתחילים יום חדש.</p>'+
+        (op?'<div class="note">'+op+' עצירות עוד פתוחות — הן יישמרו כ״לא טופלו״.</div>':'')+
+        '<p class="hint">שלחת כבר את ה־PDF למשרד? אפשר גם אחר כך, מתוך ״דוחות קודמים״.</p>'+
+        '<button class="btn btn-ok" type="button" id="confirmReset">כן, סגור ושמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>'
+      : '<h2>להתחיל יום חדש?</h2><p style="margin:0">זה יומן לדוגמה, אז אין מה לשמור. הערות החנייה נשמרות.</p>'+
+        '<button class="btn btn-bad" type="button" id="confirmReset">כן, התחל יום חדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   document.getElementById('sheetRoot').innerHTML='<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>'+html+'</div></div>';
   if(kind==='count') updateCountMsg();
@@ -824,9 +1256,14 @@ function saveCount(){
     '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
 }
 function confirmDeliver(){
-  var c=cur(), total=Object.keys(draft.q).reduce(function(t,k){ return t+(draft.q[k]||0); },0);
+  var c=byId(draft.stop)||cur(), total=Object.keys(draft.q).reduce(function(t,k){ return t+(/^dep/.test(k)?0:(draft.q[k]||0)); },0);
   if(!total){ showErr('dErr','לא סומנה כמות. אם לא סופק כלום, סמן ״לא סופק״.'); return; }
+  var noPrice=dItems(c).filter(function(i){ return i.actual && !i.price; })[0];
+  if(noPrice){ showErr('dErr','חסר מחיר ל'+ITEM_NAME[noPrice.code]+'.'); return; }
+  Object.keys(draft.price).forEach(function(k){ if(draft.price[k]>0) prices[k]=draft.price[k]; });
+  try{ localStorage.setItem('gazgal-prices', JSON.stringify(prices)); }catch(e){}
   var items=dItems(c), amount=dAmount(c), pay={method:'none', amount:0};
+  c.officeNote=(document.getElementById('offNote').value||'').trim();
   if(collects(c)){
     if(!draft.method){ showErr('dErr','בחר איך שולם.'); return; }
     if(draft.method==='cheque'){
@@ -842,27 +1279,34 @@ function confirmDeliver(){
   state.memory[c.cust]=state.memory[c.cust]||{}; if(park) state.memory[c.cust].parking=park;
   if(draft.geo){ state.memory[c.cust].lat=draft.geo[0]; state.memory[c.cust].lon=draft.geo[1]; }
   if(draft.stand) memPhotos[c.cust]=draft.stand;
+  if(draft.stand || draft.cheque) savePhotos();
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : ''));
 }
 function confirmFail(){
-  var c=cur(), txt=(document.getElementById('failTxt').value||'').trim();
+  var c=byId(draft.stop)||cur(), txt=(document.getElementById('failTxt').value||'').trim();
   if(!draft.reason){ showErr('fErr','בחר סיבה.'); return; }
   if(draft.reason==='אחר' && !txt){ showErr('fErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
   c.items.forEach(function(i){ i.actual=0; }); c.status='failed'; c.result={reason:draft.reason, text:txt, empties:{1:0,2:0}};
   after('נרשם: '+draft.reason);
 }
-function confirmHot(){
+async function confirmHot(){
   var g=function(id){ return (document.getElementById(id).value||'').trim(); };
-  var name=g('hName'), street=g('hStreet'), city=g('hCity');
+  var name=g('hName'), street=g('hStreet'), city=g('hCity'), ord=g('hOrder').replace(/\D/g,''), jn=g('hJournal').replace(/\D/g,''), cust=g('hCust').replace(/\D/g,'');
   if(!name || !street || !city){ showErr('hErr','חסר שם, רחוב או יישוב.'); return; }
   if(draft.q['1']+draft.q['2']===0){ showErr('hErr','בחר כמות.'); return; }
+  if(ord && byId(ord)){ showErr('hErr','הזמנה '+ord+' כבר נמצאת בסבב.'); return; }
   var items=[]; if(draft.q['1']) items.push(it('1',draft.q['1'])); if(draft.q['2']) items.push(it('2',draft.q['2']));
-  var s={id:'H'+String(Date.now()).slice(-6), row:999, cust:'hot-'+Date.now(), name:name, street:street, house:g('hHouse'), ent:'', apt:'', city:city,
+  var mine=state.journals.map(function(j){ return j.no; });
+  var s={id:ord||('H'+String(Date.now()).slice(-6)), orderNo:ord, row:999, cust:cust||('hot-'+Date.now()), name:name, street:street, house:g('hHouse'), ent:'', apt:'', city:city,
     type:(draft.pay==='credit'?'אשראי':'באספקה'), paidFlag:(draft.pay==='paid'), discGross:0, items:items, note:'', phones:[g('hPhone'),''],
-    status:'pending', result:null, hot:true};
-  var c=cur(), arr=state.stops;
-  if(draft.pos==='next' && c) arr.splice(arr.indexOf(c)+1,0,s); else arr.push(s);
-  after('נוספה לסבב: '+name);
+    status:'pending', result:null, hot:true, journal:jn||state.journal, fromJournal:(jn && mine.indexOf(jn)<0) ? jn : ''};
+  var c=cur(), arr=state.stops, msg='';
+  if(draft.pos==='map' && state.phase==='route'){
+    document.getElementById('confirmHot').disabled=true; document.getElementById('confirmHot').textContent='ממקם במפה…';
+    try{ msg=await placeHot(s); }catch(e){ if(arr.indexOf(s)<0) arr.push(s); msg='אין גישה למפה — נוספה בסוף'; }
+  } else if(draft.pos==='next' && c){ arr.splice(arr.indexOf(c)+1,0,s); msg='אחרי העצירה הנוכחית'; }
+  else { arr.push(s); msg='בסוף הסבב'; }
+  after('נוספה: '+name+' · '+msg);
 }
 
 /* ================= events ================= */
@@ -872,8 +1316,26 @@ document.addEventListener('click',function(ev){
   if(t.hasAttribute('data-close')){ closeSheet(); return; }
   var ds=t.dataset;
   if(ds.view){
-    if(state.phase==='morning' && ds.view!=='route' && ds.view!=='stock'){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
-    state.view=ds.view; save(); render(); window.scrollTo(0,0); return; }
+    if(state.phase==='morning' && ['route','stock','history','doc'].indexOf(ds.view)<0){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
+    if(ds.view==='doc' || ds.view==='end') docRec=null;
+    closeSheet(); state.view=ds.view; save(); render(); window.scrollTo(0,0); return; }
+  if(ds.openday){
+    idbGet('days', ds.openday).then(function(rec){ if(!rec){ toast('הדוח לא נמצא'); return; } rec.day=migrate(rec.day); docRec=rec; state.view='doc'; render(); window.scrollTo(0,0); })
+      .catch(function(){ toast('לא הצלחתי לפתוח את הדוח'); });
+    return; }
+  if(ds.swap){ draft.swap=ds.swap==='1'; press('[data-swap]',t); document.getElementById('facTruck').hidden=!draft.swap; return; }
+  if(t.id==='saveFac'){
+    var fv=function(p){ var o={}; CF.forEach(function(x){ o[x.k]=draft.fac[p+'-'+x.k]||0; }); return o; };
+    var anyIn=CF.some(function(x){ return draft.fac['i-'+x.k]!=null; }), anyOut=CF.some(function(x){ return draft.fac['o-'+x.k]!=null; });
+    if(!anyIn || !anyOut){ showErr('facErr','צריך את שתי הספירות — כניסה ויציאה. שדה ריק = 0.'); return; }
+    var fid='F'+Date.now();
+    state.facility.push({id:fid, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), inn:fv('i'), out:fv('o'), swap:draft.swap,
+      truck:(document.getElementById('facTruck').value||'').trim(), note:(document.getElementById('facNote').value||'').trim(), pink:!!draft.pink});
+    if(draft.pink){ photos['pink-'+fid]=draft.pink; savePhotos(); }
+    after('המתקן נשמר ✓'); return; }
+  if(ds.delfac){ state.facility=state.facility.filter(function(f){ return f.id!==ds.delfac; }); delete photos['pink-'+ds.delfac]; savePhotos(); save(); render(); toast('נמחק'); return; }
+  if(t.id==='sharePdf'){ sharePdf(); return; }
+  if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
   if(ds.start){ state.start=ds.start; save(); render(); return; }
   if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
   if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); updateCountMsg(); return; }
@@ -891,13 +1353,17 @@ document.addEventListener('click',function(ev){
     if(k.indexOf('q-')===0){
       var code=k.slice(2), prev=draft.q[code]; draft.q[code]=v;
       if((code==='1'||code==='2') && draft.e[code]===prev){ draft.e[code]=v; var eo=document.getElementById('o-e'+code); if(eo) eo.textContent=v; }
-      var a=document.getElementById('dAmt'); if(a) a.textContent=money(dAmount(cur()));
-      var ca=document.getElementById('chqAmt'); if(ca) ca.value=dAmount(cur());
+      refreshAmt();
     }
     else if(k==='e1' || k==='e2'){ draft.e[k[1]]=v; }
     else if(k==='h1' || k==='h2'){ draft.q[k[1]]=v; document.getElementById('hAmt').textContent=money(draft.q['1']*PRICE['1']+draft.q['2']*PRICE['2']); }
     return;
   }
+  if(ds.additem){ var ac=byId(draft.stop); if(!ac) return; draft.extra.push(ds.additem); draft.q[ds.additem]=1;
+    /* a new cylinder (קומפלט): the customer has no empty to hand back */
+    var ek = ds.additem==='dep1' ? '1' : ds.additem==='dep2' ? '2' : null;
+    if(ek && draft.e[ek]>0){ draft.e[ek]--; var eo2=document.getElementById('o-e'+ek); if(eo2) eo2.textContent=draft.e[ek]; }
+    document.getElementById('dItemsBox').innerHTML=dItemsHtml(ac); refreshAmt(); return; }
   if(ds.pay){ draft.method=ds.pay; press('[data-pay]',t); document.getElementById('chq').hidden=(draft.method!=='cheque'); return; }
   if(ds.reason){ draft.reason=ds.reason; press('[data-reason]',t); return; }
   if(ds.hpay){ draft.pay=ds.hpay; press('[data-hpay]',t); return; }
@@ -910,12 +1376,12 @@ document.addEventListener('click',function(ev){
   }
   if(ds.first){
     var s=state.stops.filter(function(x){ return x.id===ds.first; })[0], c=cur();
-    if(s && c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); }
+    if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); }
     return;
   }
   if(ds.reopen){
     var r=state.stops.filter(function(x){ return x.id===ds.reopen; })[0];
-    if(r){ r.status='pending'; r.result=null; r.items=r.items.filter(function(i){ return i.qty>0; }); delete photos['q-'+r.id];
+    if(r){ r.status='pending'; r.result=null; r.items=r.items.filter(function(i){ return i.qty>0; }); delete photos['q-'+r.id]; savePhotos();
       state.stops.splice(state.stops.indexOf(r),1); var c2=cur(); state.stops.splice(c2?state.stops.indexOf(c2):state.stops.length,0,r);
       save(); render(); window.scrollTo(0,0); toast('נפתח מחדש: '+r.name); }
     return;
@@ -943,7 +1409,10 @@ document.addEventListener('click',function(ev){
   if(t.id==='confirmDeliver'){ confirmDeliver(); return; }
   if(t.id==='confirmFail'){ confirmFail(); return; }
   if(t.id==='confirmHot'){ confirmHot(); return; }
-  if(t.id==='confirmReset'){ var mem=state.memory; state=fresh(); state.memory=mem; photos={}; after('יום חדש. ייבא את היומן.'); return; }
+  if(t.id==='confirmReset'){ var wasReal=state.source==='pdf'; t.disabled=true;
+    closeDay().then(function(){ after(wasReal?'✓ היום נסגר ונשמר ב״דוחות קודמים״. ייבא את היומן של מחר.':'יום חדש. ייבא את היומן.'); })
+      .catch(function(){ t.disabled=false; toast('השמירה בטלפון נכשלה — היום לא נמחק. נסה שוב.'); });
+    return; }
   if(t.id==='copyRep'){
     var txt=reportText(report()), ta=document.getElementById('repText');
     var fb=function(){ ta.hidden=false; ta.value=txt; ta.style.minHeight='220px'; ta.focus(); ta.select(); toast('סמן את הטקסט והעתק'); };
@@ -951,6 +1420,38 @@ document.addEventListener('click',function(ev){
     return;
   }
 });
+/* drag to reorder the queue: press the ⠿ handle and move. Page coordinates, so the page can scroll while dragging. */
+var drag=null;
+document.addEventListener('pointerdown',function(ev){
+  var h=ev.target.closest('[data-drag]'); if(!h) return;
+  ev.preventDefault();
+  var li=h.closest('.li'), items=[].slice.call(li.parentNode.children);
+  drag={id:h.dataset.drag, li:li, items:items, from:items.indexOf(li), to:items.indexOf(li), y0:ev.pageY,
+    mids:items.map(function(x){ var r=x.getBoundingClientRect(); return r.top+window.scrollY+r.height/2; }), h:li.getBoundingClientRect().height+8};
+  li.classList.add('dragging'); items.forEach(function(x){ if(x!==li) x.classList.add('shift'); });
+  try{ h.setPointerCapture(ev.pointerId); }catch(e){}
+});
+document.addEventListener('pointermove',function(ev){
+  if(!drag) return; ev.preventDefault();
+  if(ev.clientY<90) window.scrollBy(0,-12); else if(ev.clientY>window.innerHeight-150) window.scrollBy(0,12);
+  var dy=ev.pageY-drag.y0, y=drag.mids[drag.from]+dy, to=0;
+  drag.li.style.transform='translateY('+dy+'px)';
+  drag.mids.forEach(function(m,i){ if(i!==drag.from && m<y) to++; });
+  drag.to=to;
+  drag.items.forEach(function(x,i){ if(x===drag.li) return;
+    var sh = (drag.from<to && i>drag.from && i<=to) ? -drag.h : (to<drag.from && i>=to && i<drag.from) ? drag.h : 0;
+    x.style.transform = sh ? 'translateY('+sh+'px)' : ''; });
+});
+function endDrag(){
+  if(!drag) return; var d=drag; drag=null;
+  if(d.to!==d.from){
+    var ps=pending(), head=ps[0], q=ps.slice(1), mv=q.splice(d.from,1)[0]; q.splice(d.to,0,mv);
+    state.stops=done().concat([head], q); save(); toast(mv.name+' הועבר למקום '+(done().length+d.to+2));
+  }
+  render();
+}
+document.addEventListener('pointerup',endDrag);
+document.addEventListener('pointercancel',endDrag);
 document.addEventListener('input',function(ev){
   var t=ev.target; if(!draft) return;
   if(t.dataset && t.dataset.cin){
@@ -958,6 +1459,12 @@ document.addEventListener('input',function(ev){
     draft.v[t.dataset.cin]=clean ? parseInt(clean,10) : 0; t.classList.toggle('has', !!clean); updateCountMsg();
   }
   if(t.id==='cOther'){ draft.pointText=t.value.trim(); updateCountMsg(); }
+  if(t.dataset && t.dataset.price){ draft.price[t.dataset.price]=parseFloat(String(t.value).replace(',','.'))||0; refreshAmt(); }
+});
+document.addEventListener('input',function(ev){
+  var t=ev.target;
+  if(t.id==='dayNote'){ state.dayNote=t.value; save(); }
+  if(t.dataset && t.dataset.fac){ /* facility form fields */ if(draft && draft.fac){ var clean=t.value.replace(/\D/g,'').slice(0,4); if(clean!==t.value) t.value=clean; draft.fac[t.dataset.fac]=clean?parseInt(clean,10):null; } }
 });
 document.addEventListener('keydown',function(ev){
   var t=ev.target; if(ev.key!=='Enter' || !t.dataset || !t.dataset.cin) return;
@@ -969,11 +1476,13 @@ document.addEventListener('keydown',function(ev){
 document.addEventListener('change',function(ev){
   var t=ev.target;
   if(t.id==='imp'){ var f=t.files && t.files[0]; t.value=''; if(f) importPdf(f); }
-  if(t.id==='chqIn'){ readPhoto(t.files[0],function(u){ if(!draft) return; draft.cheque=u; document.getElementById('chqPrev').innerHTML='<img class="thumb" src="'+u+'" alt="הצ׳ק שצולם">'; }); }
-  if(t.id==='standIn'){ readPhoto(t.files[0],function(u){ if(!draft) return; draft.stand=u; document.getElementById('standPrev').innerHTML='<img class="thumb" src="'+u+'" alt="עמדת הבלונים שצולמה">'; }); }
+  if(t.id==='impAdd'){ var f2=t.files && t.files[0]; t.value=''; if(f2) importPdf(f2, true); }
+  if(t.dataset && t.dataset.photo){ var kind=t.dataset.photo;
+    readPhoto(t.files[0],function(u){ if(!draft) return; draft[kind]=u; var pv=document.getElementById(kind+'Prev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="התמונה שנבחרה">'; }); }
 });
 
 render();
+loadPhotos().then(function(){ if(!document.querySelector('.loading') && !document.querySelector('.scrim')) render(); });
 
 /* self-test: read a tiny built-in PDF so the driver sees at a glance that import will work here */
 window.addEventListener('load',function(){
@@ -1002,4 +1511,5 @@ window.addEventListener('load',function(){
 });
 })();
 </script>
+
 </html>
