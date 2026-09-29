@@ -235,11 +235,15 @@ document.documentElement.setAttribute('lang','he');
 
 /* ================= constants ================= */
 var VAT = 1.18;                        /* Bashan stores discounts before VAT */
-var PRICE = {'1':150, '2':450, 'dep1':130, 'dep2':330};   /* gross prices printed on the BB-454 journal; deposits for a new cylinder (קומפלט) */
+/* gross prices (incl. VAT). 1/2 as printed on the BB-454 journal; amgazit codes and prices from Bashan's items table
+   (PRITIM + MHIRON_PRITIM, price list 1, 01/06/2026); deposits for a new 12/48 cylinder as Nadir gave them. */
+var PRICE = {'1':150, '2':450, '19':130, '14':85.73, '15':380, '16':282.40, 'dep1':130, 'dep2':330};
 var KG = {'1':'12', '2':'48'};         /* Bashan item codes: 1 = 12 kg, 2 = 48 kg */
-/* Items the driver can add in the field. Amgazit codes and prices are not known yet — the driver types the price once and the phone remembers it. */
-var ITEM_NAME = {'1':'12 ק״ג', '2':'48 ק״ג', 'a5':'אמגזית 5 ק״ג', 'a25':'אמגזית 2.5 ק״ג', 'dep1':'פיקדון 12 (קומפלט)', 'dep2':'פיקדון 48 (קומפלט)'};
-var ADDABLE = ['1','2','a5','a25'];
+/* Items the driver can add in the field */
+var ITEM_NAME = {'1':'12 ק״ג', '2':'48 ק״ג', '19':'אמגזית 5 ק״ג', '14':'אמגזית 2.5 ק״ג', '15':'אמגזית 5 ק״ג קומפלט', '16':'אמגזית 2.5 ק״ג קומפלט',
+  'a5':'אמגזית 5 ק״ג', 'a25':'אמגזית 2.5 ק״ג', 'dep1':'פיקדון 12 (קומפלט)', 'dep2':'פיקדון 48 (קומפלט)'};
+var ADDABLE = ['1','2','19','14','15','16'];
+var AMG_KG = {'19':'5','15':'5','a5':'5','14':'2.5','16':'2.5','a25':'2.5'};   /* Bashan codes: 19/14 refill, 15/16 complete */
 var OFFICE_WA = '972542222968';        /* WhatsApp of the office — the report goes here */
 var KEEP_DAYS = 90;
 var WEEKDAY = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
@@ -748,10 +752,10 @@ function viewRoute(){
 }
 function viewStock(){
   return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+
-  '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 העמסה במתקן</button></div>'+
-  (state.facility.length?'<section class="card"><h3>מתקן היום</h3>'+state.facility.map(function(f){
+  '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 מתקן / רמפה</button></div>'+
+  (state.facility.length?'<section class="card"><h3>מתקן ורמפה היום</h3>'+state.facility.map(function(f){
     var ld=CF.map(function(x){ var d=(f.out[x.k]||0)-(f.inn[x.k]||0); return d?(d>0?'+':'')+d+' '+x.l:''; }).filter(Boolean).join(' · ');
-    return '<div class="sec" style="margin:0"><span><b class="num">'+esc(f.time)+'</b>'+(f.swap?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+' · '+esc(ld||'אין שינוי')+(f.pink?' · 📄':'')+'</span>'+
+    return '<div class="sec" style="margin:0"><span><b>'+esc(f.where||'מתקן')+'</b> <b class="num">'+esc(f.time)+'</b>'+(f.swap?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+' · '+esc(ld||'אין שינוי')+(f.pink?' · 📄':'')+'</span>'+
       '<button class="btn btn-ghost btn-sm" style="min-height:36px" type="button" data-delfac="'+esc(f.id)+'">מחק</button></div>'; }).join('')+'</section>':'')+
   countsList()+'</main>';
 }
@@ -779,11 +783,11 @@ function journalNos(){ return state.journals.length ? state.journals.map(functio
 function report(){
   var del=state.stops.filter(function(s){ return s.status==='delivered'; }), fail=state.stops.filter(function(s){ return s.status==='failed'; });
   var by={collect:{q1:0,q2:0,sum:0,n:0}, paid:{q1:0,q2:0,sum:0,n:0}, credit:{q1:0,q2:0,sum:0,n:0}};
-  var q={1:0,2:0}, e={1:0,2:0}, pb={cash:{1:0,2:0}, cheque:{1:0,2:0}, rcpt:{1:0,2:0}}, amg={a5:0,a25:0}, kits=[];
+  var q={1:0,2:0}, e={1:0,2:0}, pb={cash:{1:0,2:0}, cheque:{1:0,2:0}, rcpt:{1:0,2:0}}, amg={'5':0,'2.5':0}, kits=[];
   del.forEach(function(s){ var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
     s.items.forEach(function(i){ var a=i.actual||0;
       if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=a; q[i.code]+=a; pb[bk][i.code]+=a; }
-      if(amg[i.code]!=null) amg[i.code]+=a;
+      if(AMG_KG[i.code]) amg[AMG_KG[i.code]]+=a;
       if(isDep(i) && a) kits.push({s:s, kg:i.code==='dep1'?'12':'48', n:a}); });
     b.sum+=totalOf(s,true);
     e[1]+=s.result.empties[1]||0; e[2]+=s.result.empties[2]||0; });
@@ -809,7 +813,7 @@ function reportText(R){
   L.push('דוח סגירה — יומן '+journalNos().join(' + ')+(dayOf()?' · '+dayOf():''));
   L.push('נהג: '+state.driver);
   L.push('');
-  L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]+(R.amg.a5?' · אמגזית 5: '+R.amg.a5:'')+(R.amg.a25?' · אמגזית 2.5: '+R.amg.a25:''));
+  L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]+(R.amg['5']?' · אמגזית 5: '+R.amg['5']:'')+(R.amg['2.5']?' · אמגזית 2.5: '+R.amg['2.5']:''));
   L.push('לפי תשלום (12/48): מזומן '+R.pb.cash[1]+'/'+R.pb.cash[2]+' · שיקים '+R.pb.cheque[1]+'/'+R.pb.cheque[2]+' · קבלות '+R.pb.rcpt[1]+'/'+R.pb.rcpt[2]);
   if(R.groups.length>1) R.groups.forEach(function(g){ var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length; L.push('• '+(g.from?'מיומן '+g.no+' (למשוך)':'יומן '+g.no)+': '+d+'/'+g.stops.length+' סופקו'); });
   L.push('');
@@ -843,10 +847,11 @@ function pair(label,a,b,strong){ return '<tr><td class="lbl2">'+label+'</td><td 
 function pairHead(){ return '<tr><td class="lbl2"></td><th>12 ק״ג</th><th>48 ק״ג</th></tr>'; }
 function docHtml(){
   var R=report(), o=R.open&&R.open.v||{}, ev=R.eve&&R.eve.v||null, pv=R.prev&&R.prev.v||null;
+  var facOnly=R.fac.filter(function(f){ return f.where!=='רמפה'; });
   var p1='<div class="paper">'+docHead('דוח נהג יומי')+
     '<div class="row2"><table>'+pairHead()+pair('יתרות גז מיום קודם:', pv?pv.km||0:'', pv?pv.gm||0:'')+pair('יתרות מיכלים ריקים מיום קודם:', pv?pv.kr||0:'', pv?pv.gr||0:'')+'</table>'+
     (pv?'':'<div style="font-size:11.5px;color:#444;max-width:200px">אין סגירה קודמת באפליקציה — למלא ביד.</div>')+'</div>'+
-    '<div><b>האם הייתה העמסה במתקן:</b> '+(R.fac.length?'<b>כן</b> ('+R.fac.length+(R.fac.some(function(f){ return f.pink; })?', טופס ורוד צולם':'')+')':'לא')+'.  אם כן, יש לצרף טופס ורוד.</div>'+
+    '<div><b>האם הייתה העמסה במתקן:</b> '+(facOnly.length?'<b>כן</b> ('+facOnly.length+(facOnly.some(function(f){ return f.pink; })?', טופס ורוד צולם':'')+')':'לא')+'.  אם כן, יש לצרף טופס ורוד.</div>'+
     '<div class="sec2">פירוט פריקה / העמסה ברמפה ובמתקן</div>'+facLines(R)+
     '<div class="sec2">מכירה של קומפלטים</div>'+
     '<table class="wide"><thead><tr><th>צרכן</th><th>שם</th><th>12/48 ק״ג</th><th>כמות</th><th>אופן תשלום</th><th>הערות</th></tr></thead><tbody>'+
@@ -901,7 +906,7 @@ function facLines(R){
   var L=[];
   R.fac.forEach(function(f){
     var ld=CF.map(function(x){ var d=((f.out||{})[x.k]||0)-((f.inn||{})[x.k]||0); return d ? (d>0?'+':'')+d+' '+x.l : ''; }).filter(Boolean).join(' · ');
-    L.push('מתקן '+esc(f.time)+(f.swap?' · הוחלפה משאית'+(f.truck?' ל־'+esc(f.truck):''):'')+(ld?' · '+esc(ld):'')+(f.note?' · '+esc(f.note):''));
+    L.push(esc(f.where||'מתקן')+' '+esc(f.time)+(f.swap?' · הוחלפה משאית'+(f.truck?' ל־'+esc(f.truck):''):'')+(ld?' · '+esc(ld):'')+(f.note?' · '+esc(f.note):''));
   });
   state.counts.filter(function(c){ return c.point==='ramp'; }).forEach(function(c){ L.push('רמפה '+esc(c.moment)+' ('+esc(c.time)+'): '+esc(countLines(c).join(' · '))); });
   return L.length ? '<ul>'+L.map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul>' : '<div>אין.</div>';
@@ -912,7 +917,7 @@ function autoNotes(R){
   if(R.t.unpaid) L.push('<b>סופק ולא שולם: '+money(R.t.unpaid)+'</b> — '+esc(R.del.filter(function(s){ return s.result.payment.method==='unpaid'; }).map(function(s){ return s.name; }).join(', ')));
   if(R.t.prepaid) L.push('לפי הנהג שולם מראש: '+money(R.t.prepaid));
   if(R.t.office) L.push('אשראי דרך המשרד: '+money(R.t.office));
-  if(R.amg.a5||R.amg.a25) L.push('אמגזיות שסופקו: '+(R.amg.a5?R.amg.a5+'×5 ק״ג ':'')+(R.amg.a25?R.amg.a25+'×2.5 ק״ג':''));
+  if(R.amg['5']||R.amg['2.5']) L.push('אמגזיות שסופקו: '+(R.amg['5']?R.amg['5']+'×5 ק״ג ':'')+(R.amg['2.5']?R.amg['2.5']+'×2.5 ק״ג':''));
   if(R.fail.length) L.push('לא סופקו: '+R.fail.length+' (פירוט בנספח)');
   if(R.openStops.length) L.push('<b>לא טופלו: '+R.openStops.length+'</b> (פירוט בנספח)');
   if(R.changed.length) L.push('שינויים מההזמנה: '+R.changed.length+' (מודגשים בנספח)');
@@ -1072,7 +1077,7 @@ function render(){
 function ordered(s,code){ return s.items.filter(function(i){ return i.code===code; }).reduce(function(t,i){ return t+i.qty; },0); }
 function codesOf(c){ var cs=['1','2']; c.items.forEach(function(i){ if(cs.indexOf(i.code)<0) cs.push(i.code); }); (draft && draft.extra || []).forEach(function(k){ if(cs.indexOf(k)<0) cs.push(k); }); return cs; }
 function labelFor(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; return ex ? itemLabel(ex) : (ITEM_NAME[code]||code); }
-function dPrice(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; if(ex) return ex.price; return draft.price[code]!=null ? draft.price[code] : priceOf(code); }
+function dPrice(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; if(ex) return ex.price; return draft.price[code]!=null ? draft.price[code] : (prices[code]||priceOf(code)); }
 function dItems(c){
   var out=[];
   codesOf(c).forEach(function(code){ var ex=c.items.filter(function(i){ return i.code===code; })[0];
@@ -1085,8 +1090,8 @@ function dItemsHtml(c){
   var add=ADDABLE.filter(function(k){ return codes.indexOf(k)<0; }).concat(['dep1','dep2'].filter(function(k){ return codes.indexOf(k)<0; }));
   return '<div class="steps">'+gas.map(function(code){
       var ord=ordered(c,code), s=stepper('q-'+code, draft.q[code]||0, esc(labelFor(c,code)), (ord || KG[code]) ? 'בהזמנה: '+ord : 'נוסף בשטח');
-      if(PRICE[code]==null && !c.items.some(function(i){ return i.code===code; }))
-        s+='<div class="step"><label class="l" for="pr-'+code+'">מחיר ליחידה<small>כולל מע״מ · נשמר לפעם הבאה</small></label><input class="inp num" style="width:110px" id="pr-'+code+'" data-price="'+code+'" inputmode="decimal" value="'+(dPrice(c,code)||'')+'"></div>';
+      if(AMG_KG[code] && !c.items.some(function(i){ return i.code===code; }))
+        s+='<div class="step"><label class="l" for="pr-'+code+'">מחיר ליחידה<small>כולל מע״מ · לפי בש״ן, אפשר לשנות</small></label><input class="inp num" style="width:110px" id="pr-'+code+'" data-price="'+code+'" inputmode="decimal" value="'+(dPrice(c,code)||'')+'"></div>';
       return s; }).join('')+
     dep.map(function(code){ return stepper('q-'+code, draft.q[code]||0, esc(ITEM_NAME[code]), 'מיכל חדש + פיקדון '+money(PRICE[code])+' ליחידה'); }).join('')+'</div>'+
     (add.length?'<div class="chips" style="margin-top:8px">'+add.map(function(k){ return '<button type="button" class="chip" data-additem="'+k+'">+ '+esc(/^dep/.test(k)?'קומפלט '+(k==='dep1'?'12':'48'):ITEM_NAME[k])+'</button>'; }).join('')+'</div>':'')+
@@ -1126,16 +1131,18 @@ function openSheet(kind,preset){
     '</div><button class="btn btn-accent" type="button" id="applyOrder">החל את הסדר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   if(kind==='facility'){
-    draft={fac:{}, swap:false, pink:null};
+    draft={fac:{}, swap:false, pink:null, where:(preset==='רמפה'?'רמפה':'מתקן')};
     var fgrid=function(p,title){ return '<div class="field"><span class="lbl">'+title+'</span><div class="cgrid"><span></span><span class="h">גדול · 48</span><span class="h">קטן · 12</span>'+
       '<span class="r">מלא</span><input class="cin num" data-fac="'+p+'-gm" inputmode="numeric" aria-label="גדול מלא"><input class="cin num" data-fac="'+p+'-km" inputmode="numeric" aria-label="קטן מלא">'+
       '<span class="r">ריק</span><input class="cin num" data-fac="'+p+'-gr" inputmode="numeric" aria-label="גדול ריק"><input class="cin num" data-fac="'+p+'-kr" inputmode="numeric" aria-label="קטן ריק"></div></div>'; };
-    html='<h2>🏭 העמסה במתקן</h2><p class="hint">סופרים את המשאית כשנכנסים למתקן, ושוב כשיוצאים (גם אם זו משאית אחרת). האפליקציה מחשבת כמה הועמס וכמה ריקים נפרקו, וממשיכה את ההתאמה מהספירה של היציאה.</p>'+
-      fgrid('i','1. נכנסתי למתקן עם')+
-      '<div class="field"><span class="lbl">2. החלפתי משאית?</span><div class="chips"><button type="button" class="chip" data-swap="0" aria-pressed="true">לא</button><button type="button" class="chip" data-swap="1" aria-pressed="false">כן</button></div>'+
+    var isR=draft.where==='רמפה';
+    html='<h2>🏭 העמסה / פריקה</h2><div class="chips" role="group" aria-label="איפה">'+['מתקן','רמפה'].map(function(w){ return '<button type="button" class="chip" data-fwhere="'+w+'" aria-pressed="'+(w===draft.where)+'">'+(w==='רמפה'?'רמפה (המחסן באופקים)':'מתקן')+'</button>'; }).join('')+'</div>'+
+      '<p class="hint">סופרים את המשאית כשמגיעים, ושוב כשיוצאים (במתקן — גם אם זו משאית אחרת). האפליקציה מחשבת כמה הועמס וכמה ריקים נפרקו, וממשיכה את ההתאמה מהספירה של היציאה.</p>'+
+      fgrid('i','1. הגעתי עם')+
+      '<div class="field fonly"'+(isR?' hidden':'')+'><span class="lbl">2. החלפתי משאית?</span><div class="chips"><button type="button" class="chip" data-swap="0" aria-pressed="true">לא</button><button type="button" class="chip" data-swap="1" aria-pressed="false">כן</button></div>'+
       '<input class="inp num" id="facTruck" placeholder="מספר המשאית החדשה" autocomplete="off" hidden></div>'+
-      fgrid('o','3. יצאתי מהמתקן עם')+
-      '<div class="field"><span class="lbl">4. הטופס הוורוד</span>'+photoPick('pink','צלם טופס')+'</div>'+
+      fgrid('o','3. יצאתי עם')+
+      '<div class="field fonly"'+(isR?' hidden':'')+'><span class="lbl">4. הטופס הוורוד</span>'+photoPick('pink','צלם טופס')+'</div>'+
       '<div class="field"><label for="facNote">הערה (לא חובה)</label><input class="inp" id="facNote" autocomplete="off"></div>'+
       '<p class="err" id="facErr" hidden></p>'+
       '<button class="btn btn-accent" type="button" id="saveFac">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
@@ -1323,16 +1330,17 @@ document.addEventListener('click',function(ev){
     idbGet('days', ds.openday).then(function(rec){ if(!rec){ toast('הדוח לא נמצא'); return; } rec.day=migrate(rec.day); docRec=rec; state.view='doc'; render(); window.scrollTo(0,0); })
       .catch(function(){ toast('לא הצלחתי לפתוח את הדוח'); });
     return; }
+  if(ds.fwhere){ draft.where=ds.fwhere; press('[data-fwhere]',t); document.querySelectorAll('.fonly').forEach(function(e){ e.hidden=(draft.where==='רמפה'); }); if(draft.where==='רמפה'){ draft.swap=false; draft.pink=null; } return; }
   if(ds.swap){ draft.swap=ds.swap==='1'; press('[data-swap]',t); document.getElementById('facTruck').hidden=!draft.swap; return; }
   if(t.id==='saveFac'){
     var fv=function(p){ var o={}; CF.forEach(function(x){ o[x.k]=draft.fac[p+'-'+x.k]||0; }); return o; };
     var anyIn=CF.some(function(x){ return draft.fac['i-'+x.k]!=null; }), anyOut=CF.some(function(x){ return draft.fac['o-'+x.k]!=null; });
     if(!anyIn || !anyOut){ showErr('facErr','צריך את שתי הספירות — כניסה ויציאה. שדה ריק = 0.'); return; }
     var fid='F'+Date.now();
-    state.facility.push({id:fid, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), inn:fv('i'), out:fv('o'), swap:draft.swap,
+    state.facility.push({id:fid, where:draft.where, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), inn:fv('i'), out:fv('o'), swap:draft.swap,
       truck:(document.getElementById('facTruck').value||'').trim(), note:(document.getElementById('facNote').value||'').trim(), pink:!!draft.pink});
     if(draft.pink){ photos['pink-'+fid]=draft.pink; savePhotos(); }
-    after('המתקן נשמר ✓'); return; }
+    after(draft.where==='רמפה'?'הרמפה נשמרה ✓':'המתקן נשמר ✓'); return; }
   if(ds.delfac){ state.facility=state.facility.filter(function(f){ return f.id!==ds.delfac; }); delete photos['pink-'+ds.delfac]; savePhotos(); save(); render(); toast('נמחק'); return; }
   if(t.id==='sharePdf'){ sharePdf(); return; }
   if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
