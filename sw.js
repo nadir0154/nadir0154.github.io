@@ -1,8 +1,13 @@
-/* Offline support: the app shell is cached; same-origin requests try the network first
-   so updates arrive when there is signal, and fall back to the cache when there is none. */
-const CACHE = 'gazgal-driver-v2.4';
+/* Offline support + no surprise updates mid-round (FEEDBACK #18).
+   The app shell is served from this version's cache (cache-first). A new version installs in the
+   background and WAITS; the page activates it only when no round is open (applyUpdate in index.html).
+   So a push to the site never swaps the app under a driver in the middle of a delivery day. */
+const CACHE = 'gazgal-driver-v2.7';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './vendor/pdf.min.js', './vendor/pdf.worker.min.js', './vendor/html2canvas.min.js', './vendor/jspdf.umd.min.js'];
-self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))));
+});
+self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== 'gazgal-share').map(k => caches.delete(k)))));
   self.clients.claim();
@@ -22,8 +27,14 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const u = new URL(e.request.url);
   if (u.origin === location.origin) {
-    e.respondWith(fetch(e.request).then(r => { const cp = r.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); return r; })
-      .catch(() => caches.match(e.request).then(r => r || caches.match('./index.html'))));
+    e.respondWith(caches.open(CACHE).then(async c => {
+      /* every page load (including ?share=1) gets this version's index.html, never a newer one from the network */
+      const hit = e.request.mode === 'navigate' ? await c.match('./index.html') : await c.match(e.request);
+      if (hit) return hit;
+      const r = await fetch(e.request);
+      if (r.ok) c.put(e.request, r.clone());
+      return r;
+    }).catch(() => caches.match('./index.html')));
     return;
   }
   if (u.host.endsWith('googleapis.com') || u.host.endsWith('gstatic.com')) {
