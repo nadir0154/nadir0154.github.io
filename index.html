@@ -248,7 +248,10 @@ var OFFICE_WA = '972542222968';        /* WhatsApp of the office — the report 
 var KEEP_DAYS = 90;
 var WEEKDAY = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 var TYPE_BY_CODE = {'01':'בהזמנה','02':'באספקה','03':'אשראי','04':'הוראת קבע'};
-var REASONS = ['לא ענה','לא שילם','אין גישה','ביקש לדחות','בוטל ע״י המשרד','אחר'];
+/* FEEDBACK #28: not home + paid + no access to the cylinders → postponed; not home + not paid + nobody to pay → not
+   supplied (the driver does not even drive there — it can be marked from the queue). Not home + paid + access → supplied. */
+var NOT_HOME_NOACCESS = 'לא בבית — אין גישה למיכלים (נדחה)', NOT_HOME_NOPAY = 'לא בבית — אין מי שישלם';
+var REASONS = ['לא ענה',NOT_HOME_NOACCESS,NOT_HOME_NOPAY,'לא שילם','אין גישה','ביקש לדחות','בוטל ע״י המשרד','אחר'];
 var CANCEL = 'בוטל ע״י המשרד';
 /* FEEDBACK #20: the driver finds a safety problem on site — no supply, the office books a technician */
 var SAFETY = 'בעיית בטיחות';
@@ -593,6 +596,27 @@ async function geocode(q){
    a stop split into two points carries the name of its point in s.point. */
 function ptsOf(cust){ var m=state.memory[cust]; if(!m) return []; if(!m.points) m.points = m.lat ? [{name:'', lat:m.lat, lon:m.lon}] : []; return m.points; }
 function ptOf(s){ var P=ptsOf(s.cust); return s.point ? P.filter(function(p){ return p.name===s.point; })[0] || null : P[0] || null; }
+/* FEEDBACK #42: every change to a customer's saved points / parking note is sent to the server (one row per customer,
+   shared by all the drivers), and a new phone pulls them all. The newest change wins. */
+function touchPlace(cust){ if(!cust || /^hot-/.test(cust) || !state.memory[cust]) return; state.memory[cust].u=Date.now();
+  var dt=placesDirty(); if(dt.indexOf(cust)<0){ dt.push(cust); try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(dt)); }catch(e){} } }
+function placesDirty(){ try{ return JSON.parse(localStorage.getItem('gazgal-places-dirty')||'[]')||[]; }catch(e){ return []; } }
+async function syncPlaces(){
+  if(!BOT_API || bot.status!=='active') return;
+  var dt=placesDirty();
+  if(dt.length){ try{
+    var items=dt.filter(function(k){ return state.memory[k]; }).map(function(k){ return {cust:k, data:state.memory[k], u:state.memory[k].u||Date.now()}; });
+    var r=await botFetch('/api/places',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({items:items})});
+    if(r.ok){ var left=placesDirty().filter(function(k){ return dt.indexOf(k)<0; }); try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(left)); }catch(e){} }
+  }catch(e){} }
+  try{
+    var since=+(localStorage.getItem('gazgal-places-since')||0), r2=await botFetch('/api/places?since='+since); if(!r2.ok) return;
+    var j=await r2.json(), changed=0;
+    (j.items||[]).forEach(function(it){ var m=state.memory[it.cust]; if(!m || (m.u||0)<it.u){ state.memory[it.cust]=Object.assign(it.data||{}, {u:it.u}); changed++; } });
+    try{ localStorage.setItem('gazgal-places-since', String(j.now||Date.now())); }catch(e){}
+    if(changed){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+  }catch(e){}
+}
 function parkOf(s){ var m=state.memory[s.cust]||{}, pt=ptOf(s); if(!s.point) return m.parking||'';
   return pt && pt.parking ? pt.parking : pt && pt===ptsOf(s.cust)[0] ? (m.parking||'') : ''; }   /* the old note belongs to the first point */
 async function locate(s){
@@ -963,13 +987,28 @@ function liveAvg(){   /* minutes per stop, from today's gaps between deliveries 
   for(var i=1;i<ts.length;i++){ var m=(ts[i]-ts[i-1])/60000; if(m>0.5 && m<60) g.push(m); }
   if(g.length<2) return 12; g.sort(function(a,b){ return a-b; }); return Math.max(5, Math.min(25, Math.round(g[Math.floor(g.length/2)])));
 }
+/* driving minutes between two points: straight line × 1.35 for the roads, at 45 km/h (towns and moshavim) */
+function driveMin(a,b){ return Math.max(2, Math.round(dist(a,b)*1.35/45*60)); }
+/* minutes at a stop (parking, cylinders, payment) — today's gaps minus the driving between them; 7 until there are enough */
+function liveSvc(){
+  var d=state.stops.filter(function(x){ return x.result && x.result.at; }).sort(function(a,b){ return a.result.at-b.result.at; }), g=[];
+  for(var i=1;i<d.length;i++){ if(!d[i].pt || !d[i-1].pt) continue; var m=(d[i].result.at-d[i-1].result.at)/60000-driveMin(d[i-1].pt,d[i].pt); if(m>0 && m<45) g.push(m); }
+  if(g.length<2) return 7; g.sort(function(a,b){ return a-b; }); return Math.max(3, Math.min(20, Math.round(g[Math.floor(g.length/2)])));
+}
 function livePayload(pos){
-  var pend=routePending().concat(others()), tn=truckNow();
+  var pend=routePending().concat(others()), tn=truckNow(), svc=liveSvc(), avg=liveAvg();
+  /* the stop the driver last left for (Waze) goes first */
+  var lastAt=state.stops.reduce(function(m,x){ var a=x.result && x.result.at; return a>m ? a : m; },0);
+  var go=pend.filter(function(x){ return x.leftAt && x.leftAt>lastAt; }).sort(function(a,b){ return b.leftAt-a.leftAt; })[0];
+  if(go){ pend.splice(pend.indexOf(go),1); pend.unshift(go); }
+  var prev=state.stops.filter(function(x){ return x.status==='delivered' && x.pt && x.result && x.result.at; }).sort(function(a,b){ return b.result.at-a.result.at; })[0];
+  var prevPt = pos ? [pos.lat,pos.lon] : prev ? prev.pt : null;
   var row=function(x,st){ var r=x.result||{}; return {c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):''}; };
-  return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:liveAvg(),
-    lastAt:state.stops.reduce(function(m,x){ var a=x.result && x.result.at; return a>m ? a : m; },0),
+  var next=pend.map(function(x){ var o=row(x,'next'); o.d = prevPt && x.pt ? driveMin(prevPt,x.pt) : Math.max(3, avg-svc); prevPt=x.pt||null; return o; });
+  return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:avg, svc:svc, go:go?go.leftAt:0,
+    lastAt:lastAt,
     stops: done().slice().sort(function(a,b){ return ((a.result||{}).at||0)-((b.result||{}).at||0); }).map(function(x){ return row(x, x.status==='delivered'?'done':'failed'); })
-      .concat(pend.map(function(x){ return row(x,'next'); })),
+      .concat(next),
     truck: tn ? tn.v : null, pos: pos||null };
 }
 function scheduleLive(){ if(typeof bot==='undefined' || !bot || bot.status!=='active' || state.source!=='pdf') return; clearTimeout(scheduleLive.t); scheduleLive.t=setTimeout(sendLive, 6000); }
@@ -995,6 +1034,7 @@ async function pollMore(){
       if(bot.journals.length>before){ toast('📄 הגיע יומן מהמשרד'); if(!document.querySelector('.scrim')) render(); } }
   }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
+  syncPlaces(); flushOutbox();
 }
 async function loadOfficeJournal(id){
   var jr=bot.journals.filter(function(x){ return x.id===id; })[0]; if(!jr) return;
@@ -1196,9 +1236,9 @@ function custNo(s){ return s.cust && !/^hot-/.test(s.cust) ? s.cust : ''; }
 function actsHtml(c){
   var pt=ptOf(c), cts=contacts(c), mob=cts.filter(function(x){ return /^05/.test(x.num); })[0];
   return '<div class="acts">'+
-    '<a class="act waze" href="'+(pt ? 'https://waze.com/ul?ll='+pt.lat+','+pt.lon+'&navigate=yes' : 'https://waze.com/ul?q='+encodeURIComponent(navQ(c))+'&navigate=yes')+'" target="_blank" rel="noopener"><b>🧭</b>Waze'+(pt?' · '+esc(pt.name||'חנייה'):'')+'</a>'+
+    '<a class="act waze" data-go="'+esc(c.id)+'" href="'+(pt ? 'https://waze.com/ul?ll='+pt.lat+','+pt.lon+'&navigate=yes' : 'https://waze.com/ul?q='+encodeURIComponent(navQ(c))+'&navigate=yes')+'" target="_blank" rel="noopener"><b>🧭</b>Waze'+(pt?' · '+esc(pt.name||'חנייה'):'')+'</a>'+
     '<button class="act" type="button" data-sheet="call" data-preset="'+esc(c.id)+'"><b>📞</b>חיוג</button>'+
-    (mob?'<a class="act" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
+    (mob?'<a class="act" data-go="'+esc(c.id)+'" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
   '</div>';
 }
 function pills(s){ return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
@@ -1275,8 +1315,14 @@ function viewMorning(){
   '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '</main>';
 }
+function exitCountCard(){
+  if(state.phase!=='route' || state.skipExitCount || done().length || state.counts.some(function(x){ return x.point==='me'; })) return '';
+  return '<section class="card" style="border:2px solid var(--accent)"><h3 style="margin:0">🛻 ספרת את המשאית ביציאה?</h3>'+
+    '<p class="hint">מהספירה הזאת האפליקציה עוקבת אחרי כל בלון — מלאים וריקים. בלעדיה היא מתחילה מהיתרות של אתמול.</p>'+
+    '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|יציאה">ספור עכשיו</button><button class="btn btn-ghost btn-sm" type="button" id="skipExitCount">לא היום</button></div></section>';
+}
 function viewRoute(){
-  var c=cur(), p=routePending(), d=done(), out='<main>'+botCard()+journalChips();
+  var c=cur(), p=routePending(), d=done(), out='<main>'+exitCountCard()+botCard()+journalChips();
   if(!c){
     out+='<section class="card center"><span class="eyebrow">הסבב הושלם</span><h2 style="font-family:var(--display);font-weight:400;font-size:26px">כל העצירות טופלו</h2>'+
     '<p class="muted" style="margin:0">עבור ל״סוף יום״ לספירה ולדוח הסגירה.</p><button class="btn btn-accent" type="button" data-view="end">לסוף יום</button></section>';
@@ -1584,6 +1630,7 @@ var docRec=null;       /* null = today's report; otherwise a closed day from the
 function viewDoc(){
   return '<main><div class="hero"><span class="eyebrow">'+(docRec?'דוח סגור':'דוח לפקידה')+'</span><h1>'+(docRec?esc(docRec.date)+' · יומן '+esc(docRec.journals.join(' + ')):'דוח נהג יומי')+'</h1></div>'+
     '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" id="sharePdf">📤 שתף PDF</button><button class="btn btn-ghost btn-sm" type="button" id="printDoc">🖨️ הדפס</button></div>'+
+    '<button class="btn btn-ghost btn-sm" type="button" id="savePdf">⬇ שמור PDF בטלפון</button>'+
     '<a class="btn btn-ghost btn-sm linkbtn" id="waOffice" href="#" target="_blank" rel="noopener">💬 סיכום בטקסט לוואטסאפ של המשרד</a>'+
     '<p class="hint">״שתף PDF״ פותח את השיתוף של הטלפון — בוחרים וואטסאפ ואת ״משרד״. ״הדפס״ — למדפסת או ״שמור כ־PDF״.</p>'+
     '<div class="docwrap" id="docWrap"><div id="docPages"></div></div>'+
@@ -1605,8 +1652,9 @@ function printPages(){
   pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px'; paginate(pr); pr.style.cssText='';
   return pr;
 }
-async function sharePdf(){
-  var btn=document.getElementById('sharePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
+/* the printable pages as a PDF — rec = a day from the archive, or null for today */
+async function pdfBlob(rec){
+  var keep=docRec; docRec=rec;
   try{
     await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
     var pr=printPages(); pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
@@ -1617,8 +1665,42 @@ async function sharePdf(){
       pdf.addImage(cv.toDataURL('image/jpeg',0.85),'JPEG',0,0,210,297);
     }
     pr.style.cssText=''; pr.innerHTML='';
-    var D=docRec?docRec.day:state, name='דוח-נהג-'+isoOf(D.day||D.date)+'-יומן-'+(D.journal||'')+'.pdf';
-    var file=new File([pdf.output('blob')], name, {type:'application/pdf'});
+    return pdf.output('blob');
+  } finally { docRec=keep; }
+}
+function pdfName(rec){ var D=rec?rec.day:state; return 'דוח-נהג-'+isoOf(D.day||D.date)+'-יומן-'+(D.journal||'')+'.pdf'; }
+async function savePdf(){
+  var btn=document.getElementById('savePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
+  try{ var a=document.createElement('a'); a.href=URL.createObjectURL(await pdfBlob(docRec)); a.download=pdfName(docRec); document.body.appendChild(a); a.click(); a.remove(); toast('נשמר בטלפון — בתיקיית ההורדות'); }
+  catch(e){ toast('לא הצלחתי להכין PDF. נסה ״הדפס״ ← ״שמור כ־PDF״.'); }
+  btn.disabled=false; btn.textContent='⬇ שמור PDF בטלפון';
+}
+/* FEEDBACK #33: the closed day waits here (in the phone) until there is signal, then goes to the office page and
+   stays on the server for 90 days — so a broken phone loses nothing. */
+function outbox(){ return idbGet('kv','outbox').then(function(x){ return x||[]; }).catch(function(){ return []; }); }
+var flushing=false;
+async function flushOutbox(){
+  if(flushing || !BOT_API || bot.status!=='active') return; flushing=true;
+  try{
+    var ob=await outbox();
+    for(var i=0;i<ob.length;i++){ var it=ob[i], rec=await idbGet('days', it.id); if(!rec){ it.gone=true; continue; }
+      if(!it.pdf){ try{ it.pdf=await pdfBlob(migrateRec(rec)); await idbPut('kv','outbox',ob); }catch(e){} }
+      var fd=new FormData(); fd.append('meta', JSON.stringify(it.meta)); fd.append('snap', JSON.stringify(rec.day)); if(it.pdf) fd.append('pdf', it.pdf, pdfName(rec));
+      var r=await botFetch('/api/report',{method:'POST', body:fd}).catch(function(){ return null; });
+      if(r && r.ok){ it.sent=Date.now(); var idx=await dayIndex(); idx.forEach(function(x){ if(x.id===it.id) x.sent=it.sent; }); await idbPut('kv','dayIndex',idx);
+        if(!document.querySelector('.scrim') && state.view==='history') fillHistory(); toast('☁ הדוח של '+it.meta.date+' הגיע למשרד'); }
+      else break;   /* no signal — the rest waits too */
+    }
+    await idbPut('kv','outbox', ob.filter(function(x){ return !x.sent && !x.gone; }));
+  }catch(e){}
+  flushing=false;
+}
+function migrateRec(rec){ rec.day=migrate(rec.day); return rec; }
+async function sharePdf(){
+  var btn=document.getElementById('sharePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
+  try{
+    var name=pdfName(docRec);
+    var file=new File([await pdfBlob(docRec)], name, {type:'application/pdf'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
       try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
     } else {
@@ -1690,10 +1772,14 @@ async function closeDay(){
     for(var i=0;i<old.length;i++){ await idbDel('days', old[i].id); }
     idx=idx.filter(function(x){ return x.iso>=cut; }).sort(function(a,b){ return a.id<b.id?1:-1; });
     await idbPut('kv','dayIndex',idx);
+    var ob=(await outbox()).filter(function(x){ return x.id!==id; });
+    ob.push({id:id, meta:{id:id, iso:summ.iso, date:summ.date, journals:summ.journals, driver:state.driver, del:summ.del, n:summ.n, cash:R.t.cash, cheque:R.t.cheque, nq:R.t.nq,
+      later:R.t.later, unpaid:R.t.unpaid, handover:state.handover, gap:hoGap(R), text:reportText(R)}});
+    await idbPut('kv','outbox',ob);
     if(R.eve){ try{ localStorage.setItem('gazgal-last-close', JSON.stringify({date:dayOf(), v:R.eve.v, journal:state.journal})); }catch(e){} }
   }
   state=migrate(fresh()); state.memory=mem; state.start=start; photos={}; savePhotos(); save();
-  sendLive(true);
+  sendLive(true); setTimeout(flushOutbox, 1500);
 }
 function viewHistory(){
   return '<main><div class="hero"><span class="eyebrow">ארכיון · '+KEEP_DAYS+' יום אחרונים</span><h1>דוחות קודמים</h1></div>'+
@@ -1703,11 +1789,24 @@ function viewHistory(){
 function fillHistory(){
   var box=document.getElementById('histList'); if(!box) return;
   dayIndex().then(function(idx){
-    if(!idx.length){ box.innerHTML='<p class="muted center">עוד אין ימים סגורים. בסוף היום לוחצים ״סגור יום״ והדוח נשמר כאן.</p>'; return; }
+    var cloud=BOT_API && bot.status==='active' ? '<button class="btn btn-ghost btn-sm" type="button" id="restoreArchive">☁ שחזר דוחות מהשרת (טלפון חדש)</button>' : '';
+    if(!idx.length){ box.innerHTML='<p class="muted center">עוד אין ימים סגורים. בסוף היום לוחצים ״סגור יום״ והדוח נשמר כאן.</p>'+cloud; return; }
     box.innerHTML='<div class="list">'+idx.map(function(x){
       return '<button type="button" class="li" data-openday="'+esc(x.id)+'"><span class="n">📄</span><div class="hist"><div class="t">'+esc(weekday(x.date))+' · '+esc(x.date)+'</div><span class="tag t-ok num">'+x.del+'/'+x.n+'</span>'+
-        '<div class="s">יומן '+esc(x.journals.join(' + '))+'</div><span class="s num">'+money(x.cash+x.cheque)+'</span></div><span></span></button>'; }).join('')+'</div>';
+        '<div class="s">יומן '+esc(x.journals.join(' + '))+' · '+(x.sent?'☁ במשרד':'⏳ ממתין לקליטה')+'</div><span class="s num">'+money(x.cash+x.cheque)+'</span></div><span></span></button>'; }).join('')+'</div>'+cloud;
   }).catch(function(){ box.innerHTML='<p class="err">לא הצלחתי לקרוא את הארכיון בטלפון הזה.</p>'; });
+}
+async function restoreArchive(){
+  var btn=document.getElementById('restoreArchive'); if(btn){ btn.disabled=true; btn.textContent='מוריד…'; }
+  try{
+    var j=await (await botFetch('/api/reports')).json(), idx=await dayIndex(), have={}, n=0; idx.forEach(function(x){ have[x.id]=1; });
+    for(var i=0;i<(j.reports||[]).length;i++){ var r=j.reports[i]; if(have[r.id]) continue;
+      var sr=await botFetch('/api/report/'+encodeURIComponent(r.id)+'/snap'); if(!sr.ok) continue; var day=await sr.json();
+      await idbPut('days', r.id, {id:r.id, date:r.date, journals:r.journals, day:day, photos:{}});
+      idx.push({id:r.id, iso:r.iso, date:r.date, journals:r.journals, driver:r.driver, del:r.del, n:r.n, cash:r.cash, cheque:r.cheque, sent:r.created}); n++; }
+    idx.sort(function(a,b){ return a.id<b.id?1:-1; }); await idbPut('kv','dayIndex',idx);
+    toast(n ? '☁ שוחזרו '+n+' דוחות (בלי צילומים)' : 'כל הדוחות שבשרת כבר בטלפון'); fillHistory();
+  }catch(e){ toast('אין חיבור לשרת — נסה שוב'); if(btn){ btn.disabled=false; btn.textContent='☁ שחזר דוחות מהשרת (טלפון חדש)'; } }
 }
 function navbar(){
   var v = state.view==='stock' ? 'stock' : (state.view==='doc'||state.view==='history') ? 'end' : (state.phase==='morning' ? 'route' : state.view);
@@ -1894,6 +1993,8 @@ function openSheet(kind,preset){
       '<p class="hint" id="gpsMsg">'+(dpt?'יש מיקום שמור'+(dpt.name?' ('+esc(dpt.name)+')':'')+' מהפעם הקודמת.':'עומד בחנייה הנכונה? שמור, ובפעם הבאה Waze והסידור ישתמשו בו.')+'</p><div id="geoBox"></div></div>'+
     '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(parkOf(c))+'</textarea></div>'+
     '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
+    '<div class="field"><div class="chips"><button type="button" class="chip" data-nothome="1" aria-pressed="false">🏠 הלקוח לא היה בבית — סופק לעמדה</button></div>'+
+      '<p class="hint">רק כשהלקוח כבר שילם ויש גישה למיכלים. לא שילם ואין מי שישלם — ״לא סופק״.</p></div>'+
     '<div class="field"><label for="offNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="offNote" placeholder="מה שהיית כותב בעט על ההזמנה — נכנס לדוח לפקידה"></textarea></div>'+
     '<p class="err" id="dErr" hidden></p>'+
     '<button class="btn btn-ok" type="button" id="confirmDeliver">אישור אספקה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
@@ -2046,7 +2147,7 @@ function applySplit(){
   if(!s.orderNo && !s.hot) s.orderNo=s.id;
   s.point=n1;
   /* the customer's saved location becomes the first named point */
-  var P=ptsOf(s.cust); if(P.length && !P[0].name && !P.some(function(p){ return p.name===n1; })) P[0].name=n1;
+  var P=ptsOf(s.cust); if(P.length && !P[0].name && !P.some(function(p){ return p.name===n1; })){ P[0].name=n1; touchPlace(s.cust); }
   /* the new point enters the route right away, after the first one; nothing waits for the map */
   state.stops.splice(state.stops.indexOf(s)+1,0,n);
   var byMap=!!ptOf(n) && state.phase==='route';
@@ -2090,6 +2191,9 @@ function confirmDeliver(){
   try{ localStorage.setItem('gazgal-prices', JSON.stringify(prices)); }catch(e){}
   var items=dItems(c), amount=dAmount(c), pay={method:'none', amount:0};
   c.officeNote=(document.getElementById('offNote').value||'').trim();
+  if(draft.notHome) c.officeNote='הלקוח לא היה בבית — סופק לעמדה'+(c.officeNote?' · '+c.officeNote:'');
+  if(draft.notHome && collects(c) && !draft.paidBy && ['prepaid','office','later'].indexOf(draft.method)<0){
+    showErr('dErr','הלקוח לא בבית ולא שילם — לא מספקים. סמן ״לא סופק״ ← ״'+NOT_HOME_NOPAY+'״.'); return; }
   if(draft.geo && !draft.geoMode){ showErr('dErr','המיקום נקלט — בחר אם להחליף את המיקום השמור או להוסיף נקודה.'); return; }
   var gName=((document.getElementById('geoName')||{}).value||'').trim(), gOld=((document.getElementById('geoOld')||{}).value||'').trim();
   if(draft.geo && draft.geoMode==='add' && ptsOf(c.cust).length && !gName && !c.point){ showErr('dErr','תן שם לנקודה החדשה (למשל ״משק״).'); return; }
@@ -2121,6 +2225,7 @@ function confirmDeliver(){
       if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1]});
       if(nm && P.length>1) c.point=nm; } }
   if(park){ var pp=c.point ? ptOf(c) : null; if(pp) pp.parking=park; else if(!c.point) state.memory[c.cust].parking=park; }
+  if(park || draft.geo) touchPlace(c.cust);
   if(draft.stand) memPhotos[c.cust]=draft.stand;
   if(draft.stand || draft.cheque) savePhotos();
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : ''));
@@ -2185,6 +2290,8 @@ document.addEventListener('click',function(ev){
   if(t.hasAttribute('data-scrim')){ if(ev.target===t) closeSheet(); return; }
   if(t.hasAttribute('data-close')){ closeSheet(); return; }
   var ds=t.dataset;
+  /* FEEDBACK #41: tapping Waze / "בדרך אליך" = leaving for that stop. The link still opens as usual. */
+  if(ds.go){ var gs=byId(ds.go); if(gs && gs.status==='pending'){ gs.leftAt=Date.now(); save(); sendLive(); } }
   if(ds.view){
     if(state.phase==='morning' && ['route','stock','history','doc'].indexOf(ds.view)<0){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
     if(ds.view==='doc' || ds.view==='end') docRec=null;
@@ -2243,6 +2350,8 @@ document.addEventListener('click',function(ev){
     after('נוקה. אפשר לייבא יומן מחדש.'); return; }
   if(t.id==='loadSample'){ var ks=state; state=migrate(Object.assign(sampleDay(), {phase:'morning', view:'route', start:ks.start, counts:ks.counts, memory:ks.memory})); after('נטען יומן לדוגמה — הנתונים מומצאים'); return; }
   if(t.id==='sharePdf'){ sharePdf(); return; }
+  if(t.id==='savePdf'){ savePdf(); return; }
+  if(t.id==='restoreArchive'){ restoreArchive(); return; }
   if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
   if(ds.start){ state.start=ds.start; save(); render(); return; }
   if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
@@ -2274,6 +2383,8 @@ document.addEventListener('click',function(ev){
     var ek = ds.additem==='dep1' ? '1' : ds.additem==='dep2' ? '2' : null;
     if(ek && draft.e[ek]>0){ draft.e[ek]--; var eo2=document.getElementById('o-e'+ek); if(eo2) eo2.textContent=draft.e[ek]; }
     document.getElementById('dItemsBox').innerHTML=dItemsHtml(ac); refreshAmt(); return; }
+  if(t.id==='skipExitCount'){ state.skipExitCount=true; save(); render(); return; }
+  if(ds.nothome){ draft.notHome=!draft.notHome; t.setAttribute('aria-pressed', draft.notHome?'true':'false'); return; }
   if(ds.geomode){ draft.geoMode=ds.geomode; press('[data-geomode]',t); document.getElementById('geoAdd').hidden=(ds.geomode!=='add'); return; }
   if(ds.splitgo){ applySplit(); return; }
   if(ds.unsplit){ unsplit(ds.unsplit); return; }
