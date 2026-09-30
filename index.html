@@ -1372,6 +1372,10 @@ function viewRoute(){
     '</section>';
   }
   if(p.length>1){
+    var lm=state.lastMoved && byId(state.lastMoved);
+    if(lm && lm.status==='pending' && p.indexOf(lm)>=0 && p.length-p.indexOf(lm)>2)
+      out+='<div class="card" style="gap:6px"><button class="btn btn-accent btn-sm" type="button" data-rerouteafter="'+esc(lm.id)+'">🧭 סדר את השאר לפי המפה, מ'+esc(lm.name)+'</button>'+
+        '<p class="hint" style="margin:0">הזזת את '+esc(lm.name)+'. מה שלפניו נשאר כמו שסידרת; רק מה שאחריו יסודר מחדש — ורק אם תלחץ. <button class="linkish" type="button" id="dropMoved" style="display:inline;padding:0">לא צריך</button></p></div>';
     out+='<section><div class="sec"><h3>הבאים בתור · <span class="muted num">'+(p.length-1)+'</span></h3><span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" id="reAuto">🧭 מכאן</button><button class="btn btn-ghost btn-sm" style="min-height:38px;padding:0 10px" type="button" data-sheet="order">✋ ידני</button></span></div><div class="list">'+
     p.slice(1).map(function(s,i){
       return '<div class="li li-q"><span class="n num">'+(d.length+i+2)+'</span>'+
@@ -1976,7 +1980,7 @@ function openSheet(kind,preset){
       badge(pk)+pills(pk)+(pk.note?'<div class="note">📝 '+esc(pk.note)+'</div>':'')+(pkp?'<div class="mem"><b>📍 חנייה</b><span>'+esc(pkp)+'</span></div>':'')+
       actsHtml(pk)+(pk.kind==='task'?'':splitBtn(pk))+taskBtn(pk)+amBtn(pk)+
       '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-first="'+esc(pk.id)+'">⤒ עבור עכשיו</button><button class="btn btn-bad btn-sm" type="button" data-urgent="'+esc(pk.id)+'">🚨 דחוף</button></div>'+
-      '<p class="hint">⤒ עבור עכשיו — מקדים אותה ומסדר את השאר לפי המפה ממנה. 🚨 דחוף — אותו דבר, מהמקום שאתה עומד בו, ומודיע למשרד.</p>'+
+      '<p class="hint">⤒ רק מקדים אותה — השאר לא זז. לסדר את השאר ממנה: הכפתור ״🧭 סדר את השאר מ…״ ברשימה. 🚨 דחוף — מקדים, מסדר את השאר מהמקום שלך ומודיע למשרד.</p>'+
       '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" data-sheet="deliver" data-preset="'+esc(pk.id)+'">✓ סופק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="fail" data-preset="'+esc(pk.id)+'">✕ לא סופק</button></div>'+
       '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   }
@@ -2538,6 +2542,8 @@ document.addEventListener('click',function(ev){
   if(ds.safety){ draft.safety=ds.safety; press('[data-safety]',t); return; }
   if(ds.hpay){ draft.pay=ds.hpay; press('[data-hpay]',t); return; }
   if(ds.hpos){ draft.pos=ds.hpos; press('[data-hpos]',t); return; }
+  if(ds.rerouteafter){ var ra=byId(ds.rerouteafter); state.lastMoved=null; save(); render(); if(ra) rerouteAfter(ra); return; }
+  if(t.id==='dropMoved'){ state.lastMoved=null; save(); render(); return; }
   if(ds.tdur){ draft.dur=+ds.tdur; press('[data-tdur]',t); return; }
   if(ds.tam){ draft.am=!draft.am; t.setAttribute('aria-pressed', draft.am?'true':'false'); return; }
   if(ds.tpay){ draft.method=ds.tpay; press('[data-tpay]',t); document.getElementById('tAmtBox').hidden=(ds.tpay==='none'); return; }
@@ -2562,7 +2568,7 @@ document.addEventListener('click',function(ev){
   if(ds.first && bot.ackId){ var fs0=byId(ds.first); if(fs0) botAck('added', fs0.name+' — הבא בתור'); }
   if(ds.first){
     var s=state.stops.filter(function(x){ return x.id===ds.first; })[0], c=cur();
-    if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); rerouteAfter(s); }
+    if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה. השאר לא זז.'); state.lastMoved=s.id; save(); render(); }
     return;
   }
   if(ds.reopen){
@@ -2643,7 +2649,7 @@ function endDrag(){
   if(d.to!==d.from){
     var ps=routePending(), head=ps[0], q=ps.slice(1), mv=q.splice(d.from,1)[0]; q.splice(d.to,0,mv);
     state.stops=done().concat([head], q, others()); save(); toast(mv.name+' הועבר למקום '+(done().length+d.to+2));
-    render(); rerouteAfter(mv); return;
+    state.lastMoved=mv.id; save(); render(); return;
   }
   render();
 }
