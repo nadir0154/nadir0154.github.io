@@ -617,6 +617,25 @@ async function syncPlaces(){
     if(changed){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
   }catch(e){}
 }
+/* FEEDBACK #42: stand photos go to the server too (Nadir: "תמונות עמדות כן, צ'קים לא" — cheque photos stay on the
+   phone only). memory.ph = when the photo was taken; a phone that has an older one (or none) fetches it for today's stops. */
+function lsGet(k,d){ try{ return JSON.parse(localStorage.getItem(k)||'null')||d; }catch(e){ return d; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function standDirty(cust){ var d=lsGet('gazgal-stand-dirty',[]); if(d.indexOf(cust)<0){ d.push(cust); lsSet('gazgal-stand-dirty',d); } }
+function standMark(cust,ph){ var h=lsGet('gazgal-stand-have',{}); h[cust]=ph; lsSet('gazgal-stand-have',h); }
+async function syncStands(){
+  var d=lsGet('gazgal-stand-dirty',[]);
+  for(var i=0;i<d.length;i++){ var k=d[i], img=memPhotos[k]; if(!img){ continue; }
+    try{ var blob=await (await fetch(img)).blob(), r=await botFetch('/api/stand/'+encodeURIComponent(k),{method:'POST', headers:{'content-type':'image/jpeg'}, body:blob});
+      if(!r.ok) return; lsSet('gazgal-stand-dirty', lsGet('gazgal-stand-dirty',[]).filter(function(x){ return x!==k; })); }catch(e){ return; } }
+  var have=lsGet('gazgal-stand-have',{}), got=0;
+  var need=state.stops.map(function(s){ return s.cust; }).filter(function(k,ix,a){ var m=state.memory[k]; return a.indexOf(k)===ix && m && m.ph && (have[k]||0)<m.ph; });
+  for(var j=0;j<need.length;j++){ var c=need[j];
+    try{ var g=await botFetch('/api/stand/'+encodeURIComponent(c)); if(!g.ok) continue; var b=await g.blob();
+      memPhotos[c]=await new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){ res(fr.result); }; fr.readAsDataURL(b); });
+      standMark(c, state.memory[c].ph); got++; }catch(e){} }
+  if(got){ savePhotos(); if(!document.querySelector('.scrim')) render(); }
+}
 function parkOf(s){ var m=state.memory[s.cust]||{}, pt=ptOf(s); if(!s.point) return m.parking||'';
   return pt && pt.parking ? pt.parking : pt && pt===ptsOf(s.cust)[0] ? (m.parking||'') : ''; }   /* the old note belongs to the first point */
 async function locate(s){
@@ -1003,7 +1022,8 @@ function livePayload(pos){
   if(go){ pend.splice(pend.indexOf(go),1); pend.unshift(go); }
   var prev=state.stops.filter(function(x){ return x.status==='delivered' && x.pt && x.result && x.result.at; }).sort(function(a,b){ return b.result.at-a.result.at; })[0];
   var prevPt = pos ? [pos.lat,pos.lon] : prev ? prev.pt : null;
-  var row=function(x,st){ var r=x.result||{}; return {c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):''}; };
+  var row=function(x,st){ var r=x.result||{}; return {c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):'',
+    q:[qtyOf(x,'1',st==='done'), qtyOf(x,'2',st==='done')]}; };
   var next=pend.map(function(x){ var o=row(x,'next'); o.d = prevPt && x.pt ? driveMin(prevPt,x.pt) : Math.max(3, avg-svc); prevPt=x.pt||null; return o; });
   return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:avg, svc:svc, go:go?go.leftAt:0,
     lastAt:lastAt,
@@ -1034,7 +1054,7 @@ async function pollMore(){
       if(bot.journals.length>before){ toast('📄 הגיע יומן מהמשרד'); if(!document.querySelector('.scrim')) render(); } }
   }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
-  syncPlaces(); flushOutbox();
+  syncPlaces().then(syncStands); flushOutbox();
 }
 async function loadOfficeJournal(id){
   var jr=bot.journals.filter(function(x){ return x.id===id; })[0]; if(!jr) return;
@@ -2226,7 +2246,7 @@ function confirmDeliver(){
       if(nm && P.length>1) c.point=nm; } }
   if(park){ var pp=c.point ? ptOf(c) : null; if(pp) pp.parking=park; else if(!c.point) state.memory[c.cust].parking=park; }
   if(park || draft.geo) touchPlace(c.cust);
-  if(draft.stand) memPhotos[c.cust]=draft.stand;
+  if(draft.stand){ memPhotos[c.cust]=draft.stand; if(!/^hot-/.test(c.cust)){ state.memory[c.cust].ph=Date.now(); touchPlace(c.cust); standMark(c.cust, state.memory[c.cust].ph); standDirty(c.cust); } }
   if(draft.stand || draft.cheque) savePhotos();
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : ''));
 }
