@@ -362,9 +362,10 @@ function totalOf(s,actual){
   var d = ord ? dg*(Math.min(g,ord)/ord) : 0;
   return Math.max(0, Math.round((g-d+deposits(s.items,actual))*100)/100);
 }
-function changed(s){ return s.status==='delivered' && s.items.some(function(i){ return (i.actual||0)!==i.qty; }); }
+function changed(s){ return s.kind!=='task' && s.status==='delivered' && s.items.some(function(i){ return (i.actual||0)!==i.qty; }); }
 function byId(id){ return state.stops.filter(function(x){ return x.id===id; })[0]; }
 function mode(s){
+  if(s.kind==='task') return 'task';
   if(s.type==='אשראי') return 'credit';
   if(s.type==='הוראת קבע') return 'standing';
   if(s.paidFlag) return 'paid';
@@ -681,10 +682,10 @@ async function autoRoute(fromHere){
   try{
     var start=await startPoint(fromHere);
     for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; ps[i].pt=L.p||null; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
-    var r=optimize(start, located);
+    var r=routeOrder(start, located);
     state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing, rest0);
     goRoute(); state.view='route'; save(); render(); window.scrollTo(0,0); wake();
-    toast('סודר לפי מפה · כ־'+Math.round(r.km)+' ק״מ בקו אווירי'+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
+    toast('סודר לפי מפה · כ־'+Math.round(r.km)+' ק״מ בקו אווירי'+(r.am?' · 🌅 '+r.am+' של בוקר קודם':'')+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
   }catch(e){
     startRoute(false);
     toast('אין גישה למפה — סודר לפי יישוב. אפשר לסדר ידנית עם ✋.');
@@ -1023,7 +1024,7 @@ function livePayload(pos){
   var prev=state.stops.filter(function(x){ return x.status==='delivered' && x.pt && x.result && x.result.at; }).sort(function(a,b){ return b.result.at-a.result.at; })[0];
   var prevPt = pos ? [pos.lat,pos.lon] : prev ? prev.pt : null;
   var row=function(x,st){ var r=x.result||{}; return {c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):'',
-    q:[qtyOf(x,'1',st==='done'), qtyOf(x,'2',st==='done')]}; };
+    q:[qtyOf(x,'1',st==='done'), qtyOf(x,'2',st==='done')], k:x.kind==='task'?'task':undefined, tk:x.kind==='task'?String(x.task||'').slice(0,90):undefined, sv:x.kind==='task'?(x.dur||20):undefined}; };
   var next=pend.map(function(x){ var o=row(x,'next'); o.d = prevPt && x.pt ? driveMin(prevPt,x.pt) : Math.max(3, avg-svc); prevPt=x.pt||null; return o; });
   return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:avg, svc:svc, go:go?go.leftAt:0,
     lastAt:lastAt,
@@ -1053,6 +1054,8 @@ async function pollMore(){
     var r=await botFetch('/api/journals'); if(r.ok){ var j=await r.json(), before=bot.journals.length; bot.journals=j.journals||[];
       if(bot.journals.length>before){ toast('📄 הגיע יומן מהמשרד'); if(!document.querySelector('.scrim')) render(); } }
   }catch(e){}
+  try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
+    if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
   syncPlaces().then(syncStands); flushOutbox();
 }
@@ -1170,6 +1173,7 @@ function botCard(){
   if(bot.restore) out+='<section class="card" style="border:2px solid var(--accent)"><h3 style="margin:0">☁ נמצא גיבוי של היום</h3>'+
     '<p class="hint">נשמר ב־'+new Date(bot.restore.updated).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})+' · '+bot.restore.done+'/'+bot.restore.stops+' עצירות. טלפון חדש או שהאפליקציה נמחקה? שחזר וממשיכים מאיפה שעצרת.</p>'+
     '<button class="btn btn-accent" type="button" id="restoreDay">↺ שחזר את היום</button></section>';
+  (bot.tasks||[]).forEach(function(tk){ var d=tk.data||{}; out+='<button class="btn btn-accent" type="button" data-taskadd="'+esc(tk.id)+'">🛠 מטלה מהמשרד: '+esc(d.name||'')+(d.city?' · '+esc(d.city):'')+' — '+esc(String(d.text||'').slice(0,50))+' · הוסף לסבב</button>'; });
   bot.journals.forEach(function(j){ out+='<button class="btn btn-accent" type="button" data-jrload="'+esc(j.id)+'">📄 יומן מהמשרד מחכה — '+esc(j.name||'יומן')+' · '+
     (state.source==='pdf'?'הוסף לסבב':'טען')+'</button>'; });
   var w=openMsgs().length-n;
@@ -1221,7 +1225,7 @@ function truckLine(){
   var tn=truckNow(), ex=tn && tn.v; if(!ex) return '<button type="button" class="row" data-view="stock" style="all:unset;display:flex;cursor:pointer"><span class="j">🛻 אין ספירה של המשאית היום — לחץ כדי לספור</span></button>';
   var need={1:0,2:0};
   state.stops.forEach(function(s){ if(s.status!=='pending') return;
-    s.items.forEach(function(i){ if(i.code==='1'||i.code==='2') need[i.code]+=i.qty||0; }); });
+    if(s.kind==='task') return; s.items.forEach(function(i){ if(i.code==='1'||i.code==='2') need[i.code]+=i.qty||0; }); });
   function part(name,have,req){ var short=have<req;
     return '<span style="white-space:nowrap'+(short?';color:#ff8a7a;font-weight:800':'')+'">'+(short?'⚠ ':'')+name+' <bdi>'+have+'</bdi>'+
       (req?' <small style="opacity:.8">(צריך <bdi>'+req+'</bdi>'+(short?', חסר <bdi>'+(req-have)+'</bdi>':'')+')</small>':'')+'</span>'; }
@@ -1235,6 +1239,8 @@ function stepper(key,val,label,sub){
   '<button type="button" data-step="'+key+'" data-d="1" aria-label="יותר">+</button></div></div>';
 }
 function badge(s){
+  if(s.kind==='task') return '<div class="collect c-verify"><span>🛠 מטלה'+(s.fake?'<small>הזמנה פיקטיבית ביומן — לא מספקים גז</small>':'')+'</span><span class="num">'+(s.taskAmt?'לגבות '+money(s.taskAmt):'')+(s.dur?' · ~'+s.dur+' דק׳':'')+'</span></div>'+
+    '<div class="note" style="font-weight:800;font-size:16px">'+esc(s.task||'')+'</div>';
   if(s.needsOk) return '<div class="collect c-verify"><span>⏳ ממתין לאישור המשרד<small>לא מספקים עד שהמשרד מאשר</small></span><span>'+(s.reqSent?'נשלח':'לא נשלח')+'</span></div>'+badgePay(s);
   return badgePay(s);
 }
@@ -1248,7 +1254,8 @@ function badgePay(s){
 }
 function listTag(s){
   var md=mode(s), a=money(totalOf(s,false));
-  return (md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
+  if(md==='task') return '<span class="tag t-info">🛠 מטלה</span>'+(isAm(s)?' <span class="tag t-warn">🌅 בבוקר</span>':'');
+  return (isAm(s)?'<span class="tag t-warn">🌅 בבוקר</span> ':'')+(md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
     (s.hot?' <span class="tag t-acc">חמה</span>':'')+(s.cityGuess?' <span class="tag t-warn">יישוב משוער</span>':'')+
     ((s.geoHow==='רחוב'||s.geoHow==='יישוב')?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
 }
@@ -1261,7 +1268,7 @@ function actsHtml(c){
     (mob?'<a class="act" data-go="'+esc(c.id)+'" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+(firstName()||'הנהג')+' מגזגל. אני בדרך אליכם עם הגז, אגיע בעוד כ־15 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+
   '</div>';
 }
-function pills(s){ return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
+function pills(s){ if(s.kind==='task') return ''; return '<div class="items">'+s.items.filter(function(i){ return i.qty>0; }).map(function(i){ return '<span class="pill num">'+i.qty+' ×<span class="kg">'+esc(itemLabel(i))+'</span></span>'; }).join('')+'</div>'; }
 
 /* ================= screens ================= */
 function pdfHint(){
@@ -1332,6 +1339,7 @@ function viewMorning(){
   '<button class="btn btn-accent" id="goAuto" type="button">🧭 סדר הליכה אוטומטי</button>'+
   '<div class="grid2"><button class="btn btn-ghost btn-sm" id="goManual" type="button">✋ אני אסדר</button><button class="btn btn-ghost btn-sm" id="goRoute" type="button">לפי יישוב</button></div>'+
   '<p class="hint center">הסידור האוטומטי שולח למפה (OpenStreetMap) רק כתובות — בלי שמות וטלפונים.</p>'+
+  (state.stops.length?'<button class="btn btn-ghost btn-sm" type="button" data-sheet="task">🛠 הוסף מטלה (לא גז)</button>':'')+
   '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '</main>';
 }
@@ -1357,8 +1365,8 @@ function viewRoute(){
       (c.note?'<div class="note">📝 '+esc(c.note)+'</div>':'')+
       ((cpk||mp||cpt)?'<div class="mem"><b>📍 מהפעם הקודמת</b>'+(cpt?'<span>מיקום חנייה שמור'+(cpt.name?' ('+esc(cpt.name)+')':'')+' — Waze ינווט אליו</span>':'')+(cpk?'<span>'+esc(cpk)+'</span>':'')+(mp?'<img src="'+mp+'" alt="עמדת הבלונים של הלקוח">':'')+'</div>':'')+
       actsHtml(c)+
-      '<div class="go"><button class="btn btn-ok" type="button" data-sheet="deliver">✓ סופק</button><button class="btn btn-bad" type="button" data-sheet="fail">✕ לא סופק</button></div>'+
-      splitBtn(c)+
+      '<div class="go"><button class="btn btn-ok" type="button" data-sheet="deliver">'+(c.kind==='task'?'✓ בוצע':'✓ סופק')+'</button><button class="btn btn-bad" type="button" data-sheet="fail">'+(c.kind==='task'?'✕ לא בוצע':'✕ לא סופק')+'</button></div>'+
+      (c.kind==='task'?'':splitBtn(c))+taskBtn(c)+amBtn(c)+
       '<button class="btn btn-ghost btn-sm" type="button" data-sheet="safety" style="color:var(--bad);border-color:var(--bad)">⚠️ בעיית בטיחות אצל הלקוח</button>'+
       (p[1] ? '<button class="linkish" type="button" data-sheet="peek" data-preset="'+esc(p[1].id)+'">הבא בתור: <b>'+esc(p[1].name)+'</b> · הודעה / חיוג / Waze ←</button>' : '')+
     '</section>';
@@ -1443,7 +1451,7 @@ function report(){
   var del=state.stops.filter(function(s){ return s.status==='delivered'; }), fail=state.stops.filter(function(s){ return s.status==='failed'; });
   var by={collect:{q1:0,q2:0,sum:0,n:0}, paid:{q1:0,q2:0,sum:0,n:0}, credit:{q1:0,q2:0,sum:0,n:0}};
   var q={1:0,2:0}, e={1:0,2:0}, pb={cash:{1:0,2:0}, cheque:{1:0,2:0}, rcpt:{1:0,2:0}}, amg={'5':0,'2.5':0}, kits=[], loan={1:0,2:0}, loans=[];
-  del.forEach(function(s){ var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
+  del.forEach(function(s){ if(s.kind==='task') return; var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
     var ln=s.result.loan; if(ln && (ln[1]||ln[2])){ loan[1]+=ln[1]||0; loan[2]+=ln[2]||0; loans.push(s); }
     s.items.forEach(function(i){ var a=i.actual||0;
       if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=a; q[i.code]+=a; pb[bk][i.code]+=a; }
@@ -1472,7 +1480,7 @@ function report(){
   return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, loan:loan, loans:loans, t:cashTotals(), open:open, opening:opening, fromExit:!prev && !!open, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
     LBL:{collect:'באספקה (נגבה בשטח)', paid:'שולם מראש', credit:'אשראי / הוראת קבע'},
     hot:state.stops.filter(function(s){ return s.hot; }), openStops:pending(), changed:del.filter(changed),
-    transfers:state.stops.filter(function(s){ return s.fromJournal; }) };
+    transfers:state.stops.filter(function(s){ return s.fromJournal; }), tasks:state.stops.filter(function(s){ return s.kind==='task'; }) };
 }
 function reportText(R){
   var L=[];
@@ -1503,11 +1511,17 @@ function reportText(R){
   if(notes.length){ L.push(''); L.push('הערות למשרד:'); notes.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+s.officeNote); }); }
   if(R.fail.length){ L.push(''); L.push('לא סופקו:'); R.fail.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+s.result.reason+(s.result.text?' ('+s.result.text+')':'')); }); }
   if(R.openStops.length){ L.push(''); L.push('לא טופלו: '+R.openStops.map(function(s){ return s.name; }).join(', ')); }
+  if(R.tasks.length){ L.push(''); L.push('🛠 מטלות:'); R.tasks.forEach(function(s){ L.push('• '+taskLine(s)); }); }
   if(R.transfers.length){ L.push(''); L.push('למשוך מיומנים אחרים: '+R.transfers.map(function(s){ return (s.orderNo||s.id)+' מיומן '+s.fromJournal; }).join(' · ')); }
   if(R.exp && R.eve){ L.push(''); L.push('מלאי משאית — צפוי / נספר בסוף יום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]+'/'+(R.eve.v[f.k]||0); }).join(' · ')); }
   if(state.dayNote){ L.push(''); L.push('הערות: '+state.dayNote); }
   return L.join('\n');
 }
+/* FEEDBACK #44: one line per task, for the office */
+function taskLine(s){ var r=s.result||{};
+  return 'מטלה — '+s.name+(s.city?' ('+s.city+')':'')+': '+(s.task||'')+(s.fake?' [הזמנה פיקטיבית — לא סופק גז]':'')+' → '+
+    (s.status==='delivered' ? 'בוצע'+(r.done?': '+r.done:'')+(r.payment && r.payment.method!=='none'?' · '+PAY[r.payment.method]+(r.payment.method==='later'?'':' '+money(r.payment.amount)):'') :
+     s.status==='failed' ? 'לא בוצע — '+(r.reason||'')+(r.text?' ('+r.text+')':'') : 'לא טופל'); }
 function namesBy(R,method){ return R.del.filter(function(s){ return s.result.payment.method===method; }).map(function(s){ return s.name; }).join(', '); }
 /* a customer handed back cylinders lent to him, so the office must not charge him the deposit */
 function loanText(s){ var ln=s.result.loan||{};
@@ -1578,12 +1592,13 @@ function orderRow(s){
   var sup = dl ? cell(qtyOf(s,'1',true), qtyOf(s,'1',true)!==qtyOf(s,'1',false))+cell(qtyOf(s,'2',true), qtyOf(s,'2',true)!==qtyOf(s,'2',false))
     : '<td class="c" colspan="2"><b>'+(s.status==='failed'?(r.cancelled?'בוטל ע״י המשרד':'לא סופק'):'לא טופל')+'</b></td>';
   var emp = dl ? cell(r.empties[1])+cell(r.empties[2]) : '<td></td><td></td>';
-  var pay = !dl ? '' : py.method==='none' ? esc(mode(s)==='credit'?'אשראי':mode(s)==='standing'?'הו״ק':'שולם מראש') :
+  var pay = !dl ? '' : py.method==='none' ? esc(s.kind==='task'?'ללא תשלום':mode(s)==='credit'?'אשראי':mode(s)==='standing'?'הו״ק':'שולם מראש') :
     esc(PAY[py.method])+(py.method==='prepaid'?'':' '+money(py.amount))+(py.method==='cheque' && py.no?' · מס׳ '+esc(py.no):'')+(py.method==='cheque' && py.due?' · '+esc(fmtD(py.due)):'');
   var extra = s.items.filter(function(i){ return i.code!=='1' && i.code!=='2' && (i.qty || (dl && i.actual)); })
     .map(function(i){ return (i.qty?'הוזמן '+i.qty+' ':'')+(dl?'סופק '+(i.actual||0)+' ':'')+itemLabel(i); });
   if(dl && payGap(s)) pay+='<div class="chg"><b>'+esc(gapText(s))+'</b></div>';
   var note=[s.hot?'הזמנה חמה':'', s.reqId?(s.okBy?'הזמנה מהשטח — אושרה ע״י '+s.okBy:s.needsOk?'הזמנה מהשטח — לא אושרה':'הזמנה מהשטח'):'', s.fromJournal?'למשוך מיומן '+s.fromJournal:'', s.splitNote||'', s.status==='failed'?r.reason+(r.safety?': '+r.safety:'')+(r.text?' — '+r.text:''):'', extra.join(' · '),
+    s.kind==='task' ? '🛠 מטלה: '+(s.task||'')+(s.fake?' — הזמנה פיקטיבית, לא סופק גז':'')+(dl && r.done?' · בוצע: '+r.done:'') : '',
     dl && r.loan && (r.loan[1]||r.loan[2]) ? 'החזיר מושאלים (פיקדון): '+[1,2].filter(function(k){ return r.loan[k]; }).map(function(k){ return r.loan[k]+'×'+(k===1?'12':'48'); }).join(', ') : '', s.officeNote||''].filter(Boolean).join(' · ');
   return '<tr'+(!dl?' class="warn2"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
     '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(note)+'</td></tr>';
@@ -1599,6 +1614,7 @@ function autoNotes(R){
   var L=[];
   if(state.dayNote) L.push(esc(state.dayNote));
   R.loans.forEach(function(s){ L.push('<b>'+esc(loanText(s))+'</b>'); });
+  R.tasks.forEach(function(s){ L.push('🛠 '+esc(taskLine(s))); });
   if(R.t.later) L.push('ישלמו למשרד: '+money(R.t.later)+' — '+esc(namesBy(R,'later')));
   if(R.t.unpaid) L.push('<b>סופק ולא שולם: '+money(R.t.unpaid)+'</b> — '+esc(namesBy(R,'unpaid')));
   if(R.t.prepaid) L.push('לפי הנהג שולם מראש: '+money(R.t.prepaid));
@@ -1958,9 +1974,9 @@ function openSheet(kind,preset){
       '<div class="addr">'+esc(addr(pk))+'<span class="city">'+esc(pk.city)+'</span></div>'+
       (custNo(pk)?'<div class="custline num" style="margin:0">צרכן <b>'+esc(custNo(pk))+'</b>'+(pk.id && !pk.hot?' · הזמנה '+esc(pk.id):'')+'</div>':'')+
       badge(pk)+pills(pk)+(pk.note?'<div class="note">📝 '+esc(pk.note)+'</div>':'')+(pkp?'<div class="mem"><b>📍 חנייה</b><span>'+esc(pkp)+'</span></div>':'')+
-      actsHtml(pk)+splitBtn(pk)+
+      actsHtml(pk)+(pk.kind==='task'?'':splitBtn(pk))+taskBtn(pk)+amBtn(pk)+
       '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-first="'+esc(pk.id)+'">⤒ עבור עכשיו</button><button class="btn btn-bad btn-sm" type="button" data-urgent="'+esc(pk.id)+'">🚨 דחוף</button></div>'+
-      '<p class="hint">⤒ רק מקדים אותה. 🚨 דחוף — מקדים וגם מסדר את כל השאר מהמקום שלה.</p>'+
+      '<p class="hint">⤒ עבור עכשיו — מקדים אותה ומסדר את השאר לפי המפה ממנה. 🚨 דחוף — אותו דבר, מהמקום שאתה עומד בו, ומודיע למשרד.</p>'+
       '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" data-sheet="deliver" data-preset="'+esc(pk.id)+'">✓ סופק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="fail" data-preset="'+esc(pk.id)+'">✕ לא סופק</button></div>'+
       '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   }
@@ -1969,6 +1985,9 @@ function openSheet(kind,preset){
       return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+'</div>'+
     '<p class="hint">אם החיוג לא נפתח בלחיצה, המספר מופיע כאן להקלדה.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   }
+  if(kind==='deliver' && c && c.kind==='task'){ html=taskDoneSheet(c); kind=''; }
+  if(kind==='task'){ html=newTaskSheet(); }
+  if(kind==='mktask'){ html=mkTaskSheet(c); }
   if(kind==='deliver' && c && c.needsOk){
     /* FEEDBACK #21: no supply until the office approved this order */
     draft={stop:c.id};
@@ -2040,7 +2059,7 @@ function openSheet(kind,preset){
   }
   if(kind==='hot'){
     draft={q:{'1':0,'2':1}, pay:'collect', pos:'map', kit:false};
-    html='<h2>הזמנה חמה</h2>'+
+    html='<h2>הזמנה חמה</h2>'+'<button class="btn btn-ghost btn-sm" type="button" data-sheet="task">🛠 זו מטלה, לא גז — התקנה, בדיקה, איסוף…</button>'+
     (BOT_API && bot.status==='active' ? '<button class="btn btn-ghost btn-sm" type="button" data-sheet="inbox">📥 הודעות מהבוט'+(newCount()?' ('+newCount()+' חדשות)':'')+'</button>' : '')+
     '<button class="btn btn-ghost btn-sm" type="button" data-sheet="office">📥 מצילום של המשרד (וואטסאפ)</button>'+'<p class="hint">הזמנה שנכנסה תוך כדי סבב, או הזמנה מודפסת שקיבלת מנהג אחר. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
     '<div class="field"><label for="hName">שם</label><input class="inp" id="hName" autocomplete="off"></div>'+
@@ -2275,6 +2294,7 @@ function confirmFail(){
   if(!draft.reason){ showErr('fErr','בחר סיבה.'); return; }
   if(draft.reason==='אחר' && !txt){ showErr('fErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
   c.items.forEach(function(i){ i.actual=0; }); c.status='failed'; c.result={at:Date.now(), reason:draft.reason, text:txt, empties:{1:0,2:0}, cancelled:draft.reason===CANCEL};
+  if(c.officeTask) taskAck(c.officeTask,'failed', draft.reason+(txt?' — '+txt:''));
   after('נרשם: '+draft.reason);
 }
 async function confirmHot(){
@@ -2294,14 +2314,118 @@ async function confirmHot(){
   if(!bot.ackId && !draft.fromOffice){ s.needsOk=true; s.reqId='rq-'+s.id+'-'+Date.now(); s.reqSent=false; }
   botAck('added', name);
   if(s.needsOk) setTimeout(flushRequests, 300);
-  var c=cur(), arr=state.stops, msg='';
-  if(draft.pos==='urgent'){ arr.splice(c?arr.indexOf(c):arr.length,0,s); save(); urgentRoute(s.id); return; }
-  if(draft.pos==='map' && state.phase==='route'){
-    document.getElementById('confirmHot').disabled=true; document.getElementById('confirmHot').textContent='ממקם במפה…';
-    try{ msg=await placeHot(s); }catch(e){ if(arr.indexOf(s)<0) arr.push(s); msg='אין גישה למפה — נוספה בסוף'; }
-  } else if(draft.pos==='next' && c){ arr.splice(arr.indexOf(c)+1,0,s); msg='אחרי העצירה הנוכחית'; }
-  else { arr.push(s); msg='בסוף הסבב'; }
-  after('נוספה: '+name+' · '+msg);
+  addStop(s, draft.pos, name);
+}
+function addStop(s, pos, what){
+  var c=cur(), arr=state.stops;
+  if(pos==='urgent'){ arr.splice(c?arr.indexOf(c):arr.length,0,s); save(); urgentRoute(s.id); return; }
+  if(pos==='next' && c){ arr.splice(arr.indexOf(c)+1,0,s); after('נוספה: '+what+' · אחרי העצירה הנוכחית'); return; }
+  arr.push(s);
+  if(pos==='map' && state.phase==='route'){
+    after('נוספה: '+what+' · ממקם במפה…');
+    spotFor(s).then(function(sp){ if(s.status!=='pending' || state.stops.indexOf(s)<0) return; var m=putAt(s,sp); save(); if(!document.querySelector('.scrim')) render(); toast(what+': '+m); })
+      .catch(function(){ toast(what+': אין גישה למפה — בסוף הסבב'); });
+    return; }
+  after('נוספה: '+what+' · '+(state.phase==='route'?'בסוף הסבב':'תסודר עם כל השאר'));
+}
+
+/* ================= FEEDBACK #44: tasks — a stop with no gas ("חיבור מנגל", a check, a pickup) =================
+   From the office page, typed by the driver, or a "הזמנה פיקטיבית" in the journal (Bashan forces a gas line; the
+   real job is in the free text) turned into a task. It goes into the route like any stop and into the report. */
+function taskBtn(s){
+  if(s.status!=='pending' || s.splitOf || splitSibs(s).length) return '';
+  if(s.kind==='task') return s.fake ? '<button class="linkish" type="button" data-untask="'+esc(s.id)+'">↩ זו כן הזמנת גז רגילה</button>' : '';
+  return '<button class="linkish" type="button" data-sheet="mktask" data-preset="'+esc(s.id)+'">🛠 זו מטלה, לא גז (הזמנה פיקטיבית)</button>';
+}
+function durChips(){ return '<div class="field"><span class="lbl">כמה זמן בערך</span><div class="chips">'+[10,20,30,60].map(function(m){ return '<button type="button" class="chip" data-tdur="'+m+'" aria-pressed="'+(draft.dur===m)+'">'+m+' דק׳</button>'; }).join('')+'</div>'+
+  '<p class="hint">נכנס להערכת ההגעה שהמשרד רואה.</p></div>'; }
+function mkTaskSheet(c){
+  draft={stop:c.id, dur:20};
+  return '<h2>🛠 '+esc(c.name)+' — מטלה</h2><p class="hint">הזמנה פיקטיבית: ביומן יש שורת גז, אבל העבודה היא מה שכתוב בהערה. הגז לא יסופק, ובדוח יסומן ״הזמנה פיקטיבית — לא סופק גז״.</p>'+
+    '<div class="field"><label for="mkText">מה צריך לעשות</label><textarea class="inp" id="mkText">'+esc(c.note||'')+'</textarea></div>'+durChips()+
+    '<p class="err" id="mkErr" hidden></p><button class="btn btn-accent" type="button" id="confirmMkTask">הפוך למטלה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function newTaskSheet(){
+  draft={dur:20, pos:'map', am:false};
+  var f=function(id,l,extra){ return '<div class="field"><label for="'+id+'">'+l+'</label><input class="inp'+(extra||'')+'" id="'+id+'" autocomplete="off"></div>'; };
+  return '<h2>🛠 מטלה חדשה</h2><p class="hint">עצירה בלי גז — התקנה, בדיקה, איסוף. נכנסת לסידור ההליכה, להערכה של המשרד ולדוח.</p>'+
+    '<div class="field"><label for="tText">מה צריך לעשות</label><textarea class="inp" id="tText" placeholder="למשל: חיבור מנגל לצובר, בדיקת דליפה"></textarea></div>'+
+    f('tName','שם הלקוח')+'<div class="grid2">'+f('tPhone','טלפון',' num')+f('tCust','מס׳ צרכן (אם יש)',' num')+'</div>'+
+    '<div class="grid2">'+f('tStreet','רחוב')+f('tHouse','מספר',' num')+'</div>'+f('tCity','יישוב')+
+    durChips()+
+    '<div class="field"><label for="tAmt0">לגבות (לא חובה, ₪)</label><input class="inp num" id="tAmt0" inputmode="decimal" autocomplete="off"></div>'+
+    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['map','איפה שהכי קרוב במסלול'],['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='map')+'">'+x[1]+'</button>'; }).join('')+
+      '<button type="button" class="chip" data-tam="1" aria-pressed="false">🌅 בבוקר</button></div></div>'+
+    '<p class="err" id="tErr0" hidden></p><button class="btn btn-accent" type="button" id="confirmNewTask">הוסף לסבב</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function taskStop(d){
+  var cust=String(d.cust||'').replace(/\D/g,'');
+  return {id:'T'+String(Date.now()).slice(-7)+Math.floor(Math.random()*10), kind:'task', task:d.text, dur:+d.dur||20, taskAmt:+d.amount||0, am:!!d.am, officeTask:d.officeTask||'',
+    row:999, cust:cust||('hot-'+Date.now()), name:d.name||'מטלה', street:d.street||'', house:d.house||'', ent:'', apt:'', city:d.city||'', type:'באספקה', paidFlag:false, discGross:0,
+    items:[], note:d.officeTask?'מהמשרד':'', phones:[d.phone||'',''], status:'pending', result:null, hot:true, journal:state.journal, fromJournal:''};
+}
+function confirmNewTask(){
+  var g=function(id){ return (document.getElementById(id).value||'').trim(); }, text=g('tText'), city=g('tCity');
+  if(!text){ showErr('tErr0','כתוב מה צריך לעשות.'); return; }
+  if(!city){ showErr('tErr0','חסר יישוב — בלעדיו אין איפה לשים את המטלה במסלול.'); return; }
+  var st=taskStop({text:text, name:g('tName'), phone:g('tPhone'), cust:g('tCust'), street:g('tStreet'), house:g('tHouse'), city:city, dur:draft.dur, amount:parseFloat(g('tAmt0').replace(',','.'))||0, am:draft.am});
+  addStop(st, draft.pos, '🛠 '+st.name);
+}
+function taskDoneSheet(c){
+  draft={stop:c.id, method:c.taskAmt?null:'none'};
+  return '<h2>🛠 בוצע — '+esc(c.name)+'</h2><div class="note" style="font-weight:800">'+esc(c.task||'')+'</div>'+
+    '<div class="field"><label for="tDone">מה נעשה (לא חובה)</label><textarea class="inp" id="tDone" placeholder="למשל: חובר מנגל, נבדקה דליפה — תקין"></textarea></div>'+
+    '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['none','ללא תשלום'],['cash','מזומן'],['cheque','צ׳ק'],['later','ישלם למשרד']].map(function(x){ return '<button type="button" class="chip" data-tpay="'+x[0]+'" aria-pressed="'+(draft.method===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>'+
+    '<div class="field" id="tAmtBox"'+(draft.method==='none'?' hidden':'')+'><label for="tAmt">סכום (₪)</label><input class="inp num" id="tAmt" inputmode="decimal" value="'+(c.taskAmt||'')+'"></div></div>'+
+    '<div class="field"><label for="tNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="tNote"></textarea></div>'+
+    '<p class="err" id="tErr" hidden></p><button class="btn btn-ok" type="button" id="confirmTask">✓ בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function confirmTask(){
+  var c=byId(draft.stop); if(!c) return;
+  if(!draft.method){ showErr('tErr','בחר תשלום (או ״ללא תשלום״).'); return; }
+  var amt=parseFloat(String(document.getElementById('tAmt').value||'').replace(',','.'))||0;
+  if(draft.method!=='none' && amt<=0){ showErr('tErr','כתוב את הסכום.'); return; }
+  var done=(document.getElementById('tDone').value||'').trim();
+  c.items.forEach(function(i){ i.actual=0; }); c.status='delivered'; c.officeNote=(document.getElementById('tNote').value||'').trim();
+  c.result={at:Date.now(), payment:draft.method==='none'?{method:'none',amount:0}:{method:draft.method, amount:Math.round(amt*100)/100, owed:c.taskAmt||Math.round(amt*100)/100},
+    empties:{1:0,2:0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), done:done};
+  if(c.officeTask) taskAck(c.officeTask,'done', done||'בוצע');
+  after('✓ בוצע: '+c.name);
+}
+/* the office's tasks: they wait in the bot card until the driver adds them (#25 — the driver accepts every order) */
+async function taskAck(id,status,result){ try{ await botFetch('/api/task/'+encodeURIComponent(id),{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({status:status, result:result||''})}); }catch(e){} }
+
+/* ================= FEEDBACK #45 / #46: the route follows the driver's choice =================
+   ⤒ or dragging a stop keeps it where the driver put it and re-orders everything after it by the map, from it.
+   A customer marked "🌅 בבוקר" (e.g. a restaurant in the old city — no parking later) goes first in the morning. */
+function isAm(s){ return !!(s.am || (state.memory[s.cust]||{}).am); }
+function amActive(){ return new Date().getHours()<11; }
+function amBtn(s){
+  if(s.status!=='pending') return '';
+  return '<button class="linkish" type="button" data-am="'+esc(s.id)+'">'+(isAm(s)?'🌅 תמיד בבוקר — בטל':'🌅 סמן: תמיד בבוקר (למשל: אין חניה אחר כך)')+'</button>';
+}
+function routeOrder(start, located){
+  var am=amActive() ? located.filter(function(x){ return isAm(x.s); }) : [], rest=located.filter(function(x){ return am.indexOf(x)<0; });
+  if(!am.length) return optimize(start, located);
+  var r1=optimize(start, am), r2=optimize(r1.path[r1.path.length-1].p, rest);
+  return {path:r1.path.concat(r2.path), km:r1.km+r2.km, am:am.length};
+}
+async function rerouteAfter(s){
+  var ps=routePending(), ix=ps.indexOf(s); if(ix<0 || ps.length-ix<3) return;
+  var rest=ps.slice(ix+1);
+  toast('מסדר את השאר מ'+s.name+'…');
+  try{
+    var L=s.pt || (await locate(s)).p; if(!L){ toast(s.name+' לא נמצא במפה — השאר בלי שינוי'); return; }
+    s.pt=L;
+    var located=[], missing=[];
+    for(var i=0;i<rest.length;i++){ var x=rest[i]; if(x.pt===undefined){ var l2=await locate(x); x.geoHow=l2.how; x.pt=l2.p||null; } if(x.pt) located.push({s:x, p:x.pt}); else missing.push(x); }
+    var order=routeOrder(L, located).path.map(function(x){ return x.s; }).concat(missing);
+    /* the route may have changed while the map worked: what is now up to s stays, then the new order, then anything new */
+    var now=routePending(), k=now.indexOf(s); if(k<0) return;
+    var tail=order.filter(function(x){ return now.indexOf(x)>k; }), extra=now.slice(k+1).filter(function(x){ return tail.indexOf(x)<0; });
+    state.stops=done().concat(now.slice(0,k+1), tail, extra, others()); save(); if(!document.querySelector('.scrim')) render();
+    toast('השאר סודר מחדש לפי המפה, מ'+s.name);
+  }catch(e){ toast('אין גישה למפה — רק '+s.name+' זז'); }
 }
 
 /* ================= events ================= */
@@ -2414,6 +2538,21 @@ document.addEventListener('click',function(ev){
   if(ds.safety){ draft.safety=ds.safety; press('[data-safety]',t); return; }
   if(ds.hpay){ draft.pay=ds.hpay; press('[data-hpay]',t); return; }
   if(ds.hpos){ draft.pos=ds.hpos; press('[data-hpos]',t); return; }
+  if(ds.tdur){ draft.dur=+ds.tdur; press('[data-tdur]',t); return; }
+  if(ds.tam){ draft.am=!draft.am; t.setAttribute('aria-pressed', draft.am?'true':'false'); return; }
+  if(ds.tpay){ draft.method=ds.tpay; press('[data-tpay]',t); document.getElementById('tAmtBox').hidden=(ds.tpay==='none'); return; }
+  if(t.id==='confirmTask'){ confirmTask(); return; }
+  if(t.id==='confirmNewTask'){ confirmNewTask(); return; }
+  if(t.id==='confirmMkTask'){ var mk=byId(draft.stop), mt=(document.getElementById('mkText').value||'').trim();
+    if(!mt){ showErr('mkErr','כתוב מה צריך לעשות.'); return; }
+    mk.kind='task'; mk.fake=true; mk.task=mt; mk.dur=draft.dur; after('🛠 '+mk.name+' — מטלה (הזמנה פיקטיבית)'); return; }
+  if(ds.untask){ var ut=byId(ds.untask); if(ut){ delete ut.kind; delete ut.fake; delete ut.task; delete ut.dur; save(); closeSheet(); render(); toast(ut.name+' — חזרה להזמנת גז'); } return; }
+  if(ds.am){ var as=byId(ds.am); if(as){ var on=!isAm(as);
+      if(custNo(as)){ state.memory[as.cust]=state.memory[as.cust]||{}; state.memory[as.cust].am=on; touchPlace(as.cust); if(!on) as.am=false; } else as.am=on;
+      save(); closeSheet(); render(); toast(on?'🌅 '+as.name+' — ייכנס ראשון בסידור של הבוקר (גם בפעמים הבאות)':as.name+' — כבר לא ״בבוקר״'); } return; }
+  if(ds.taskadd){ var ot=(bot.tasks||[]).filter(function(x){ return x.id===ds.taskadd; })[0]; if(!ot) return;
+    bot.tasks=bot.tasks.filter(function(x){ return x!==ot; }); taskAck(ot.id,'added','נכנס לסבב');
+    var ts=taskStop(Object.assign({}, ot.data, {officeTask:ot.id})); addStop(ts, 'map', '🛠 '+ts.name); return; }
   if(ds.mv){
     var ps=pending(), i=ps.findIndex(function(s){ return s.id===ds.mv; }), j=i+(+ds.d);
     if(j<1 || j>=ps.length) return;
@@ -2423,7 +2562,7 @@ document.addEventListener('click',function(ev){
   if(ds.first && bot.ackId){ var fs0=byId(ds.first); if(fs0) botAck('added', fs0.name+' — הבא בתור'); }
   if(ds.first){
     var s=state.stops.filter(function(x){ return x.id===ds.first; })[0], c=cur();
-    if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); }
+    if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה'); rerouteAfter(s); }
     return;
   }
   if(ds.reopen){
@@ -2504,6 +2643,7 @@ function endDrag(){
   if(d.to!==d.from){
     var ps=routePending(), head=ps[0], q=ps.slice(1), mv=q.splice(d.from,1)[0]; q.splice(d.to,0,mv);
     state.stops=done().concat([head], q, others()); save(); toast(mv.name+' הועבר למקום '+(done().length+d.to+2));
+    render(); rerouteAfter(mv); return;
   }
   render();
 }
