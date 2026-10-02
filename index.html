@@ -209,6 +209,10 @@ td.v,th.v{text-align:end}
 .paper .ok2{font-weight:700}
 .paper .bad2{font-weight:700;text-decoration:underline}
 .paper ul{margin:2px 0;padding-inline-start:18px}
+/* FEEDBACK #48: the delivery note is as long as its content, not a full A4 */
+.paper.dnp{height:auto;padding-bottom:44px;font-size:14px}
+.paper.dnp td,.paper.dnp th{padding:6px 8px}
+.sigpad{display:block;width:100%;height:190px;background:#fff;border:2px dashed var(--line);border-radius:12px;touch-action:none;cursor:crosshair}
 @media print{
   @page{size:A4;margin:0}
   html,body{background:#fff!important}
@@ -236,8 +240,8 @@ document.documentElement.setAttribute('lang','he');
 /* ================= constants ================= */
 var VAT = 1.18;                        /* Bashan stores discounts before VAT */
 /* gross prices (incl. VAT). 1/2 as printed on the BB-454 journal; amgazit codes from Bashan's items table,
-   prices from the live price list (01/06/2026) as Nadir confirmed; deposits 130/330 incl. VAT per Nadir. */
-var PRICE = {'1':150, '2':450, '19':130, '14':90, '15':380, '16':280, 'dep1':130, 'dep2':330};
+   prices from the price list of 01/10/2026 (GazGalV/Technician/): refill 12 kg 150 / 48 kg 450, deposits 130 / 300 (complete 280 / 750). */
+var PRICE = {'1':150, '2':450, '19':130, '14':90, '15':380, '16':280, 'dep1':130, 'dep2':300};
 var KG = {'1':'12', '2':'48'};         /* Bashan item codes: 1 = 12 kg, 2 = 48 kg */
 /* Items the driver can add in the field */
 var ITEM_NAME = {'1':'12 ק״ג', '2':'48 ק״ג', '19':'אמגזית 5 ק״ג', '14':'אמגזית 2.5 ק״ג', '15':'אמגזית 5 ק״ג קומפלט', '16':'אמגזית 2.5 ק״ג קומפלט',
@@ -258,6 +262,8 @@ var SAFETY = 'בעיית בטיחות';
 var SAFETY_KINDS = ['ריח גז','דליפה / צינור פגוע','ווסת או ברז תקול','מכשיר תקול','ליקוי בעמדת הבלונים','אחר'];
 var OFFICE_TEL = '0542222968';
 var PAY = {cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המשרד', later:'ישלם למשרד', prepaid:'שולם מראש', unpaid:'לא שולם'};
+var PAY_FOR = ['קומפלט','מיכל זר','חוב קודם','אחר'];   /* office feedback מ2: what the money was for */
+var COMPANY = 'גז גל ואנונו בע״מ', COMPANY_ID = '513040790';   /* FEEDBACK #48: the delivery note's header */
 var POINTS = {me:'נדיר', eyal:'אייל', ramp:'רמפה'};
 var POINT_BTN = {me:'המשאית שלי', eyal:'משאית אייל', ramp:'רמפה', other:'אחר'};
 var MOMENTS = ['כניסה','יציאה','יציאה למתקן','סוף יום'];
@@ -437,7 +443,7 @@ function countLines(c){
   if(am.length){ L.push('אמגזיות'); am.forEach(function(f){ L.push(f.kg+' ק"ג '+c.v[f.k]+' '+f.s); }); }
   return L;
 }
-function countMsg(c){ return [pointName(c)+' '+c.moment].concat(countLines(c)).join('\n'); }
+function countMsg(c){ return [pointName(c)+(c.plate?' (משאית '+c.plate+')':'')+' '+c.moment].concat(countLines(c)).join('\n'); }
 function lastCount(point,moment){ var r=null; state.counts.forEach(function(c){ if(c.point===point && c.moment===moment) r=c; }); return r; }
 function nextMoment(point){
   var own=state.counts.filter(function(c){ return c.point===point; });
@@ -453,6 +459,141 @@ function countsList(){
     '<div class="grid2"><a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/?text='+encodeURIComponent(countMsg(c))+'" target="_blank" rel="noopener">שלח לקבוצה</a>'+
     '<button class="btn btn-ghost btn-sm" type="button" data-delcount="'+c.id+'">מחק</button></div></div>';
   }).join('')+'</div>';
+}
+/* ---------- יומן משאית (01/10): continuity follows the TRUCK, not the driver's day ----------
+   The truck Nadir works with stays at the facility overnight; Salem unloads its empties and loads full ones before he
+   arrives, and three trucks rotate between Ofakim and the facility. So each truck (by licence plate) keeps its latest
+   count — in the phone and on the server, shared by all drivers. The morning exit count is the truth: its difference
+   from the truck's last count is what happened at the facility (to compare with the pink form), and the day's opening
+   is that exit count — the same number the top bar starts from, so the bar and the report cannot disagree. */
+function plateOk(p){ return String(p||'').replace(/\D/g,'').slice(0,10); }
+function trucks(){ return lsGet('gazgal-trucks',{}); }
+function plates(){ var T=trucks(); return Object.keys(T).sort(function(a,b){ return ((T[b]||{}).at||0)-((T[a]||{}).at||0); }); }
+function myPlate(){ return state.truck || lsGet('gazgal-my-truck','') || plates()[0] || ''; }
+function truckSave(plate,c){
+  var T=trucks(); T[plate]={v:c.v, at:idMs(c)||Date.now(), day:dayOf(), moment:c.moment, time:c.time, by:state.driver||''}; lsSet('gazgal-trucks',T);
+  var d=lsGet('gazgal-trucks-dirty',[]); if(d.indexOf(plate)<0) d.push(plate); lsSet('gazgal-trucks-dirty',d);
+  syncTrucks();
+}
+async function syncTrucks(){
+  if(typeof bot==='undefined' || !BOT_API || bot.status!=='active') return;
+  try{
+    var T=trucks(), d=lsGet('gazgal-trucks-dirty',[]);
+    if(d.length){ var r=await botFetch('/api/trucks',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({items:d.map(function(p){ return {plate:p, data:T[p]}; })})});
+      if(r.ok) lsSet('gazgal-trucks-dirty', lsGet('gazgal-trucks-dirty',[]).filter(function(p){ return d.indexOf(p)<0; })); }
+    var g=await botFetch('/api/trucks'); if(!g.ok) return;
+    var items=(await g.json()).items||[], T2=trucks(), ch=false;
+    items.forEach(function(it){ var mine=T2[it.plate]; if(it.data && (!mine || (it.data.at||0)>(mine.at||0))){ T2[it.plate]=it.data; ch=true; } });
+    if(ch) lsSet('gazgal-trucks',T2);
+  }catch(e){}
+}
+/* now − before, per kind: + full = loaded at the facility, − empty = unloaded there */
+function truckMove(a,b){ var m={}, any=false; CF.forEach(function(f){ m[f.k]=(b[f.k]||0)-(a[f.k]||0); if(m[f.k]) any=true; }); return any ? m : null; }
+function moveWords(m){
+  if(!m) return '';
+  var L=[], kg={g:'48',k:'12'};
+  ['g','k'].forEach(function(s){ var f=m[s+'m'], e=m[s+'r'];
+    if(f>0) L.push('הועמסו '+f+'×'+kg[s]+' מלאים'); if(f<0) L.push('הורדו '+(-f)+'×'+kg[s]+' מלאים');
+    if(e<0) L.push('פורקו '+(-e)+'×'+kg[s]+' ריקים'); if(e>0) L.push('נוספו '+e+'×'+kg[s]+' ריקים'); });
+  return L.join(' · ');
+}
+/* ---------- ניהול צי (01/10): the driver's side — km, fuel, faults, emergency numbers ----------
+   Reports wait in the phone and go to the server when there is signal; the phone makes the id, so a resend never
+   writes twice. The office page keeps the dates and the garage log. The emergency numbers and the truck's insurance
+   policies are kept in the phone, so they open in a dead zone too. */
+var FUEL_SRC=['מיכל אופקים','מיכל רמת חובב','תחנת דלק'];
+var FAULTS=['פנצ׳ר / צמיג','נורת אזהרה','בלמים','תאורה','דליפה','מנוף / הרמה','תאונה','אחר'];
+function fleetCache(){ return lsGet('gazgal-fleet',{vehicles:[],emergency:[]}); }
+function vehicleOf(plate){ return (fleetCache().vehicles||[]).filter(function(v){ return v.plate===plate; })[0] || null; }
+function fleetQueue(kind,plate,data,photo){
+  var id='fl-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+  data.at=data.at||Date.now(); if(photo) data.photo=true;
+  return idbGet('kv','fleetOut').then(function(q){ q=q||[]; q.push({id:id, kind:kind, plate:plate, data:data, photo:photo||null}); return idbPut('kv','fleetOut',q); })
+    .then(function(){ syncFleet(true); }).catch(function(){});
+}
+var fleetBusy=false;
+async function syncFleet(sendOnly){
+  if(typeof bot==='undefined' || !BOT_API || bot.status!=='active' || fleetBusy) return; fleetBusy=true;
+  try{
+    var q=(await idbGet('kv','fleetOut'))||[], left=[];
+    for(var i=0;i<q.length;i++){ var it=q[i];
+      try{ var r=await botFetch('/api/fleet/log',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:it.id, kind:it.kind, plate:it.plate, data:it.data})});
+        if(!r.ok) throw 0;
+        if(it.photo){ var b=await (await fetch(it.photo)).blob(), pr=await botFetch('/api/fleet/photo/'+it.id,{method:'POST', headers:{'content-type':b.type||'image/jpeg'}, body:b}); if(!pr.ok) throw 0; }
+      }catch(e){ left=q.slice(i); break; } }
+    await idbPut('kv','fleetOut',left);
+    if(!sendOnly && (!bot.fleetAt || Date.now()-bot.fleetAt>10*60000)){ var g=await botFetch('/api/fleet'); if(g.ok){ lsSet('gazgal-fleet', await g.json()); bot.fleetAt=Date.now(); } }
+  }catch(e){}
+  fleetBusy=false;
+}
+/* what the driver must know about his truck today: a test or an insurance that ran out (UC-20: such a truck should not go out) */
+function vehicleAlerts(plate){
+  var v=vehicleOf(plate), out=[]; if(!v) return out;
+  var today=isoOf(todayStr());
+  ((v.data||{}).items||[]).forEach(function(it){ if(it.everyKm || !it.due) return;
+    var n=Math.round((new Date(it.due+'T12:00')-new Date(today+'T12:00'))/864e5);
+    if(n<0) out.push({bad:true, t:it.l+' פג ב־'+fmtD(it.due)}); else if(n<=7 && /טסט|ביטוח/.test(it.l)) out.push({bad:false, t:it.l+' — עוד '+n+' ימים ('+fmtD(it.due)+')'}); });
+  return out;
+}
+function fleetBtns(){
+  var al=vehicleAlerts(state.truck||myPlate());
+  return (al.length?'<div class="note"'+(al.some(function(a){ return a.bad; })?' style="color:var(--bad)"':'')+'>⚠ משאית '+esc(state.truck||myPlate())+': '+esc(al.map(function(a){ return a.t; }).join(' · '))+' — לדבר עם המשרד</div>':'')+
+    '<div class="grid2" style="grid-template-columns:repeat(3,1fr)"><button class="btn btn-ghost btn-sm" type="button" data-sheet="fuel">⛽ תדלוק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="fault">🔧 תקלה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="sos" style="color:var(--bad);border-color:var(--bad)">🆘 חירום</button></div>';
+}
+function plateField(){ return '<div class="field"><label for="flPlate">משאית (מספר רישוי)</label><input class="inp num" id="flPlate" inputmode="numeric" autocomplete="off" value="'+esc(myPlate())+'"></div>'; }
+function fuelSheet(){
+  draft={src:null};
+  return '<h2>⛽ תדלוק</h2>'+plateField()+
+    '<div class="grid2"><div class="field"><label for="fLit">כמה ליטר</label><input class="inp num" id="fLit" inputmode="decimal" autocomplete="off"></div>'+
+      '<div class="field"><label for="fKm">ק״מ במד</label><input class="inp num" id="fKm" inputmode="numeric" autocomplete="off"></div></div>'+
+    '<div class="field"><span class="lbl">מאיפה</span><div class="chips">'+FUEL_SRC.map(function(x){ return '<button type="button" class="chip" data-fsrc="'+x+'" aria-pressed="false">'+x+'</button>'; }).join('')+'</div></div>'+
+    '<div class="field" id="fCostBox" hidden><label for="fCost">כמה שולם (₪)</label><input class="inp num" id="fCost" inputmode="decimal" autocomplete="off"></div>'+
+    '<p class="hint">התדלוק מהמיכלים שלנו נספר מול הסולר שנכנס למיכל — כך רואים פערים.</p><p class="err" id="fuErr" hidden></p>'+
+    '<button class="btn btn-accent" type="button" id="confirmFuel">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function faultSheet(){
+  draft={what:null, drive:null};
+  return '<h2>🔧 תקלה ברכב</h2>'+plateField()+
+    '<div class="field"><span class="lbl">מה קרה</span><div class="chips">'+FAULTS.map(function(x){ return '<button type="button" class="chip" data-fwhat="'+x+'" aria-pressed="false">'+x+'</button>'; }).join('')+'</div></div>'+
+    '<div class="field"><label for="ftText">פירוט</label><textarea class="inp" id="ftText" placeholder="מה רואים, איפה אתה, מה כבר עשית"></textarea></div>'+
+    '<div class="field"><span class="lbl">אפשר להמשיך לנסוע?</span><div class="chips"><button type="button" class="chip" data-fdrive="yes" aria-pressed="false">כן, ממשיך</button><button type="button" class="chip" data-fdrive="no" aria-pressed="false">לא יכול לנסוע</button></div></div>'+
+    '<span class="lbl">תמונה (לא חובה)</span>'+photoPick('fltImg','צלם')+
+    '<div class="field"><label for="ftKm">ק״מ במד (לא חובה)</label><input class="inp num" id="ftKm" inputmode="numeric" autocomplete="off"></div>'+
+    '<p class="err" id="ftErr" hidden></p><button class="btn btn-bad" type="button" id="confirmFault">שלח למשרד</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function sosSheet(){
+  var fc=fleetCache(), L=(fc.emergency||[]).filter(function(x){ return x.phone; }), pl=state.truck||myPlate(), v=vehicleOf(pl), pol=(v&&v.data&&v.data.pol)||{};
+  if(!L.length) L=[{label:'משטרה',phone:'100'},{label:'מד״א',phone:'101'},{label:'כבאות והצלה',phone:'102'},{label:'משרד גז גל',phone:OFFICE_TEL}];
+  return '<h2>🆘 חירום</h2><div class="list">'+L.map(function(x){ return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+esc(String(x.phone).replace(/[^\d+*#]/g,''))+'"><span class="n">📞</span><div><div class="t">'+esc(x.label)+'</div><div class="s num">'+esc(x.phone)+(x.note?' · '+esc(x.note):'')+'</div></div><span></span></a>'; }).join('')+'</div>'+
+    (pol.co||pol.c||pol.f ? '<div class="mem"><b>🛡 ביטוח — משאית '+esc(pl)+'</b>'+(pol.co?'<span>'+esc(pol.co)+'</span>':'')+(pol.c?'<span>פוליסת חובה: <b class="num">'+esc(pol.c)+'</b></span>':'')+(pol.f?'<span>פוליסת מקיף: <b class="num">'+esc(pol.f)+'</b></span>':'')+'</div>' : '')+
+    '<details class="amg"><summary>מה עושים בתאונה או בתקלה בדרך</summary><ol style="margin:6px 0;padding-inline-start:20px;display:grid;gap:6px">'+
+      ['עוצרים במקום בטוח, מהבהבים, אפוד זוהר ומשולש אזהרה.','יש פצועים, ריח גז או דליפה — מתרחקים, לא מעשנים ולא מדליקים אש, ומתקשרים מיד ל־101 / 102. אומרים שעל המשאית יש בלוני גז.',
+       'מצלמים: המשאית, הרכב השני והלוחית שלו, המקום.','לוקחים מהנהג השני: שם, ת״ז, טלפון, מספר רישוי, חברת ביטוח ומספר פוליסה.','מעדכנים את המשרד, ומדווחים כאן: ״🔧 תקלה״ ← ״תאונה״.']
+        .map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ol><p class="hint">נוהל כללי. המשרד מעדכן את המספרים בדף המשרד; הם שמורים בטלפון ונפתחים גם בלי קליטה.</p></details>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+}
+function confirmFuel(){
+  var g=function(id){ return (document.getElementById(id).value||'').trim(); }, pl=plateOk(g('flPlate')), lit=parseFloat(g('fLit').replace(',','.')), km=parseInt(g('fKm').replace(/\D/g,''),10)||0;
+  if(pl.length<5){ showErr('fuErr','כתוב את מספר הרישוי.'); return; }
+  if(!(lit>0 && lit<1500)){ showErr('fuErr','כמה ליטר?'); return; }
+  if(!draft.src){ showErr('fuErr','מאיפה תדלקת?'); return; }
+  var d={liters:Math.round(lit*10)/10, src:draft.src}; if(km) d.km=km; var cost=parseFloat(g('fCost').replace(',','.')); if(draft.src==='תחנת דלק' && cost>0) d.cost=cost;
+  lsSet('gazgal-my-truck', pl); fleetQueue('fuel', pl, d); after('⛽ נרשם: '+d.liters+' ליטר · '+draft.src);
+}
+function confirmFault(){
+  var g=function(id){ return (document.getElementById(id).value||'').trim(); }, pl=plateOk(g('flPlate')), txt=g('ftText'), km=parseInt(g('ftKm').replace(/\D/g,''),10)||0;
+  if(pl.length<5){ showErr('ftErr','כתוב את מספר הרישוי.'); return; }
+  if(!draft.what){ showErr('ftErr','מה קרה?'); return; }
+  if(draft.what==='אחר' && !txt){ showErr('ftErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
+  if(!draft.drive){ showErr('ftErr','אפשר להמשיך לנסוע?'); return; }
+  var d={what:draft.what, text:txt, canDrive:draft.drive, status:'open', driver:state.driver||''}; if(km) d.km=km;
+  fleetQueue('fault', pl, d, draft.fltImg||null);
+  var no=draft.drive==='no', msgT='🔧 תקלה במשאית '+pl+': '+draft.what+(txt?' — '+txt:'')+(no?'\nלא יכול להמשיך לנסוע.':'')+'\n— '+(state.driver||'הנהג');
+  document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשלח למשרד ✓</h2><div class="msg">'+esc(msgT)+'</div>'+
+    (no?'<a class="btn btn-bad linkbtn" href="tel:'+OFFICE_TEL+'">📞 התקשר למשרד</a><button class="btn btn-ghost btn-sm" type="button" data-sheet="sos">🆘 מספרי חירום (גרירה, ביטוח)</button>':'')+
+    '<a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(msgT)+'" target="_blank" rel="noopener">💬 גם בוואטסאפ למשרד</a>'+
+    '<p class="hint">המשרד מקבל התראה בדף המשרד. בלי קליטה — הדיווח יישלח כשתחזור.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  draft=null;
 }
 function cin(k,label){ return '<input class="cin num" id="c-'+k+'" data-cin="'+k+'" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" aria-label="'+label+'">'; }
 function updateCountMsg(){
@@ -994,13 +1135,14 @@ async function pollInbox(quiet,force){
     if(newCount()!==before && !document.querySelector('.scrim')) render();
   }catch(e){ /* no signal — try again next time */ }
 }
-function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(!BOT_API || bot.status!=='active') return; pollInbox(true); pollMore(); checkRestore(); sendLive(); bot.polling=setInterval(function(){ pollInbox(); pollMore(); }, 30000);
+function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(!BOT_API || bot.status!=='active') return; pollInbox(true); pollMore(); checkRestore(); sendLive(); syncDn(); bot.polling=setInterval(function(){ pollInbox(); pollMore(); }, 30000);
   if(bot.liveTimer) clearInterval(bot.liveTimer); bot.liveTimer=setInterval(function(){ if(!document.hidden) sendLive(); }, 180000); }
 
 /* ---- FEEDBACK #40: customers call the office "מתי הנהג מגיע?". The office page shows where the route is: what was
    done and when, what is next, and an estimate per stop. Sent after every change and every 3 minutes while the app
    is open. Location only if the driver allowed it (a switch in the bot card), and only while on the route.
-   No phones and no money — name, customer number, town and street, which the office has in Bashan anyway. ---- */
+   No phones — name, customer number, town and street, which the office has in Bashan anyway. Since 01/10 (office
+   feedback מ2, Nadir's decision) also each order's amount and what was received, and the driver's notes (מ1). ---- */
 function shareLoc(){ try{ return localStorage.getItem('gazgal-share-loc')!=='0'; }catch(e){ return true; } }
 function liveAvg(){   /* minutes per stop, from today's gaps between deliveries (median), 5–25, else 12 */
   var ts=state.stops.map(function(x){ return x.result && x.result.at; }).filter(Boolean).sort(), g=[];
@@ -1023,14 +1165,22 @@ function livePayload(pos){
   if(go){ pend.splice(pend.indexOf(go),1); pend.unshift(go); }
   var prev=state.stops.filter(function(x){ return x.status==='delivered' && x.pt && x.result && x.result.at; }).sort(function(a,b){ return b.result.at-a.result.at; })[0];
   var prevPt = pos ? [pos.lat,pos.lon] : prev ? prev.pt : null;
-  var row=function(x,st){ var r=x.result||{}; return {c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):'',
-    q:[qtyOf(x,'1',st==='done'), qtyOf(x,'2',st==='done')], k:x.kind==='task'?'task':undefined, tk:x.kind==='task'?String(x.task||'').slice(0,90):undefined, sv:x.kind==='task'?(x.dur||20):undefined}; };
+  var row=function(x,st){ var r=x.result||{}, py=r.payment, o={c:custNo(x), n:x.name, a:addr(x), t:x.city, pt:x.point||'', o:x.orderNo||(x.hot?'':x.id), s:st, at:r.at||0, why:st==='failed'?(r.reason||''):'',
+    q:[qtyOf(x,'1',st==='done'), qtyOf(x,'2',st==='done')], k:x.kind==='task'?'task':undefined, tk:x.kind==='task'?String(x.task||'').slice(0,90):undefined, sv:x.kind==='task'?(x.dur||20):undefined};
+    /* office feedback מ2: the order's amount and what was received · מ4: a discount · מ1: the driver's note to the office */
+    o.md=mode(x); o.m = x.kind==='task' ? (x.taskAmt||0) : totalOf(x, st==='done'); if(x.kind==='task') o.tp=x.taskPay||'';
+    if(st==='done' && py) o.py={k:py.method, a:py.amount||0, f:payForText(py)||undefined};
+    if(r.disc) o.ds={l:r.disc.list, p:r.disc.price, r:r.disc.reason};
+    var nt=[st==='failed'?[r.safety,r.text].filter(Boolean).join(' — '):'',x.kind==='task'&&r.done?'בוצע: '+r.done:'', x.officeNote||''].filter(Boolean).join(' · ');
+    if(nt) o.nt=nt.slice(0,300);
+    if(x.dn) o.dn=dnNo(x.dn.no);
+    return o; };
   var next=pend.map(function(x){ var o=row(x,'next'); o.d = prevPt && x.pt ? driveMin(prevPt,x.pt) : Math.max(3, avg-svc); prevPt=x.pt||null; return o; });
   return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:avg, svc:svc, go:go?go.leftAt:0,
     lastAt:lastAt,
     stops: done().slice().sort(function(a,b){ return ((a.result||{}).at||0)-((b.result||{}).at||0); }).map(function(x){ return row(x, x.status==='delivered'?'done':'failed'); })
       .concat(next),
-    truck: tn ? tn.v : null, pos: pos||null };
+    truck: tn ? tn.v : null, plate: state.truck||'', pos: pos||null };
 }
 function scheduleLive(){ if(typeof bot==='undefined' || !bot || bot.status!=='active' || state.source!=='pdf') return; clearTimeout(scheduleLive.t); scheduleLive.t=setTimeout(sendLive, 6000); }
 async function sendLive(closed){
@@ -1057,7 +1207,7 @@ async function pollMore(){
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
-  syncPlaces().then(syncStands); flushOutbox();
+  syncPlaces().then(syncStands); flushOutbox(); syncTrucks(); syncFleet();
 }
 async function loadOfficeJournal(id){
   var jr=bot.journals.filter(function(x){ return x.id===id; })[0]; if(!jr) return;
@@ -1198,7 +1348,7 @@ function topbar(){
   return (state.source==='sample' ? '<div class="demo">יומן לדוגמה · הנתונים מומצאים. ייבא את היומן שלך מבש״ן כדי להתחיל.</div>' : '')+
   '<header class="topbar"><div class="row"><span class="j">'+(state.source==='none' ? 'אין יומן טעון' : 'יומן '+esc(state.activeJ||state.journal)+(state.activeJ?' (מסונן)':state.journals.length>1?' +'+(state.journals.length-1):''))+' · '+esc(state.day||state.date)+(state.driver?' · '+esc(state.driver):'')+'</span>'+
   '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
-  '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span style="display:flex;gap:10px;align-items:center">'+inboxBtn()+'<span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></span></div>'+
+  '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span style="display:flex;gap:10px;align-items:center"><button type="button" data-sheet="sos" aria-label="חירום — מספרים ונוהל" style="font:inherit;font-size:13px;font-weight:800;border:1px solid rgba(255,255,255,.35);background:transparent;color:inherit;border-radius:999px;padding:2px 10px;min-height:30px">🆘</button>'+inboxBtn()+'<span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></span></div>'+
   '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div>'+truckLine()+'</header>';
 }
 function inboxBtn(){
@@ -1239,7 +1389,7 @@ function stepper(key,val,label,sub){
   '<button type="button" data-step="'+key+'" data-d="1" aria-label="יותר">+</button></div></div>';
 }
 function badge(s){
-  if(s.kind==='task') return '<div class="collect c-verify"><span>🛠 מטלה'+(s.fake?'<small>הזמנה פיקטיבית ביומן — לא מספקים גז</small>':'')+'</span><span class="num">'+(s.taskAmt?'לגבות '+money(s.taskAmt):'')+(s.dur?' · ~'+s.dur+' דק׳':'')+'</span></div>'+
+  if(s.kind==='task') return '<div class="collect c-verify"><span>🛠 מטלה'+(s.fake?'<small>הזמנה פיקטיבית ביומן — לא מספקים גז</small>':'')+'</span><span class="num">'+(s.fake?'':esc(taskPayText(s))+' · ')+durText(s)+'</span></div>'+
     '<div class="note" style="font-weight:800;font-size:16px">'+esc(s.task||'')+'</div>';
   if(s.needsOk) return '<div class="collect c-verify"><span>⏳ ממתין לאישור המשרד<small>לא מספקים עד שהמשרד מאשר</small></span><span>'+(s.reqSent?'נשלח':'לא נשלח')+'</span></div>'+badgePay(s);
   return badgePay(s);
@@ -1345,8 +1495,8 @@ function viewMorning(){
 }
 function exitCountCard(){
   if(state.phase!=='route' || state.skipExitCount || done().length || state.counts.some(function(x){ return x.point==='me'; })) return '';
-  return '<section class="card" style="border:2px solid var(--accent)"><h3 style="margin:0">🛻 ספרת את המשאית ביציאה?</h3>'+
-    '<p class="hint">מהספירה הזאת האפליקציה עוקבת אחרי כל בלון — מלאים וריקים. בלעדיה היא מתחילה מהיתרות של אתמול.</p>'+
+  return '<section class="card" style="border:2px solid var(--accent)"><h3 style="margin:0">🛻 ספירת יציאה מהמתקן</h3>'+
+    '<p class="hint">סופרים את המשאית לפני שיוצאים, עם מספר הרישוי שלה. מהספירה הזאת האפליקציה עוקבת אחרי כל בלון, היא ה״פתיחה״ בדוח, וההפרש מהסגירה של המשאית אתמול הוא מה שהמתקן העמיס ופרק — להשוואה לטופס הוורוד.</p>'+
     '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|יציאה">ספור עכשיו</button><button class="btn btn-ghost btn-sm" type="button" id="skipExitCount">לא היום</button></div></section>';
 }
 function viewRoute(){
@@ -1390,9 +1540,10 @@ function viewRoute(){
     out+='<section><div class="sec"><h3>הושלמו · <span class="muted num">'+d.length+'</span></h3></div><div class="list">'+
     d.slice().reverse().map(function(s){ var r=s.result||{}, py=r.payment;
       var tg = s.status==='delivered'
-        ? '<span class="tag t-ok">סופק'+(py && py.method!=='none' ? ' · '+esc(PAY[py.method])+' '+money(py.amount) : '')+'</span>'
+        ? '<span class="tag t-ok">סופק'+(py && py.method!=='none' ? ' · '+esc(PAY[py.method])+(py.method==='prepaid'?'':' '+money(py.amount)) : '')+'</span>'+(r.disc?' <span class="tag t-warn">הנחה</span>':'')+(s.dn?' <span class="tag t-info">🧾 '+dnNo(s.dn.no)+'</span>':'')
         : r.cancelled ? '<span class="tag t-warn">בוטל ע״י המשרד</span>' : '<span class="tag t-bad">לא סופק · '+esc(r.reason||'')+'</span>';
-      return '<div class="li done-li"><span class="n">'+(s.status==='delivered'?'✓':'✕')+'</span><div><div class="t">'+esc(s.name)+'</div><div style="margin-top:4px">'+tg+'</div></div><div class="ctl"><button class="ic" type="button" data-reopen="'+s.id+'" aria-label="פתח מחדש את '+esc(s.name)+'">↺</button></div></div>';
+      var dnB = s.status==='delivered' && s.kind!=='task' ? '<button class="ic" type="button" data-sheet="dn" data-preset="'+esc(s.id)+'" aria-label="תעודת משלוח ל'+esc(s.name)+'"'+(s.dn?' style="border-color:var(--info)"':'')+'>🧾</button>' : '';
+      return '<div class="li done-li"><span class="n">'+(s.status==='delivered'?'✓':'✕')+'</span><div><div class="t">'+esc(s.name)+'</div><div style="margin-top:4px">'+tg+'</div></div><div class="ctl">'+dnB+'<button class="ic" type="button" data-reopen="'+s.id+'" aria-label="פתח מחדש את '+esc(s.name)+'">↺</button></div></div>';
     }).join('')+'</div></section>';
   }
   return out+'</main>';
@@ -1402,13 +1553,13 @@ function truckCard(){
   if(!tn) return '<section class="card"><h3>🛻 על המשאית עכשיו</h3><p class="hint">אין עדיין ספירה של המשאית היום. ספור כשאתה יוצא מהמתקן או מהמחסן, ומשם האפליקציה עוקבת לבד אחרי כל אספקה.</p>'+
     '<button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|יציאה">ספור את המשאית עכשיו</button></section>';
   var v=tn.v, cell=function(n,l){ return '<div class="kpi"><span class="v num"'+(n<0?' style="color:var(--bad)"':'')+'>'+n+'</span><span class="k">'+l+'</span></div>'; };
-  return '<section class="card"><div class="sec" style="margin:0"><h3>🛻 על המשאית עכשיו</h3><span class="tag t-info">'+esc(tn.from)+'</span></div>'+
+  return '<section class="card"><div class="sec" style="margin:0"><h3>🛻 על המשאית עכשיו'+(state.truck?' <small class="muted num">'+esc(state.truck)+'</small>':'')+'</h3><span class="tag t-info">'+esc(tn.from)+'</span></div>'+
     '<div class="grid2">'+cell(v.gm,'גדולים מלאים · 48')+cell(v.km,'קטנים מלאים · 12')+cell(v.gr,'גדולים ריקים')+cell(v.kr,'קטנים ריקים')+'</div>'+
     '<p class="hint">'+(tn.n?'אחרי '+tn.n+' אספקות':'עוד לא סופק כלום')+' מאז. מספר שלילי = משהו לא נרשם — ספור מחדש.</p>'+
     '<button class="btn btn-ghost btn-sm" type="button" data-sheet="count" data-preset="me|">ספור את המשאית מחדש</button></section>';
 }
 function viewStock(){
-  return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+truckCard()+
+  return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+truckCard()+fleetBtns()+
   '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 מחסן / מתקן</button></div>'+
   (state.facility.length?'<section class="card"><h3>מחסן ומתקן היום</h3>'+state.facility.map(function(f){
     return '<div class="sec" style="margin:0"><span><b class="num">'+esc(f.time)+'</b> · '+esc(mvText(f).join(' · ')||'אין שינוי')+(f.swap?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+(f.pink?' · 📄':'')+'</span>'+
@@ -1464,11 +1615,16 @@ function report(){
     b.sum+=totalOf(s,true);
     e[1]+=s.result.empties[1]||0; e[2]+=s.result.empties[2]||0; });
   var open=firstCount('me','יציאה'), eve=lastCount('me','סוף יום');
-  var prev = state.prevEve!==undefined ? state.prevEve : state.prevManual || (function(){ var lc=lastClose(); return lc && lc.date!==dayOf() ? lc : null; })();
-  /* the opening ("פתיחה") = yesterday's balance plus what was loaded / unloaded before the first delivery.
-     Without a balance, this morning's exit count — and then only what moved after that count.
+  var prev = state.prevEve!==undefined ? state.prevEve : state.prevManual || state.truckPrev ||
+    (function(){ var lc=lastClose(); return lc && lc.date!==dayOf() && (!state.truck || !lc.plate || lc.plate===state.truck) ? lc : null; })();
+  /* יומן משאית (01/10, from a day with a truck plate): the opening ("פתיחה") IS this morning's exit count, and what the
+     facility did overnight is the difference from the truck's last count. Before that, the opening was yesterday's
+     balance plus what was typed as loaded — and the empties Salem unloaded were never typed, so the report showed
+     empties that were not on the truck while the top bar (from the exit count) was right.
      Loading / unloading later in the day is not part of the opening; it only moves what the truck should end with. */
-  var fac=state.facility||[], base = prev ? {v:prev.v, t:0} : open ? {v:open.v, t:idMs(open)} : null;
+  var byTruck=!!state.truck && !!open;
+  var fac=state.facility||[], base = byTruck ? {v:open.v, t:idMs(open)} : prev ? {v:prev.v, t:0} : open ? {v:open.v, t:idMs(open)} : null;
+  var mm = byTruck && prev ? truckMove(prev.v, open.v) : null;
   var firstAt=state.stops.reduce(function(m,s){ var a=s.result && s.result.at; return a && (!m || a<m) ? a : m; }, 0);
   var early={gm:0,km:0,gr:0,kr:0}, later={gm:0,km:0,gr:0,kr:0};
   fac.forEach(function(f){ if(base && idMs(f)<base.t) return; var d=moveOf(f), into=(!firstAt || idMs(f)<firstAt) ? early : later; CF.forEach(function(x){ into[x.k]+=d[x.k]; }); });
@@ -1481,7 +1637,7 @@ function report(){
     var g=groups.filter(function(x){ return x.no===(s.journal||nos[0]); })[0]||groups[0]; g.stops.push(mergedStop(s)); });
   Object.keys(other).forEach(function(no){ groups.push({no:no, from:true, stops:other[no]}); });
   groups.forEach(function(g){ g.stops.sort(function(a,b){ return (a.row||999)-(b.row||999); }); });
-  return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, loan:loan, loans:loans, t:cashTotals(), open:open, opening:opening, fromExit:!prev && !!open, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
+  return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, loan:loan, loans:loans, t:cashTotals(), open:open, opening:opening, fromExit:byTruck || (!prev && !!open), mm:mm, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
     LBL:{collect:'באספקה (נגבה בשטח)', paid:'שולם מראש', credit:'אשראי / הוראת קבע'},
     hot:state.stops.filter(function(s){ return s.hot; }), openStops:pending(), changed:del.filter(changed),
     transfers:state.stops.filter(function(s){ return s.fromJournal; }), tasks:state.stops.filter(function(s){ return s.kind==='task'; }) };
@@ -1492,6 +1648,7 @@ function reportText(R){
   L.push('נהג: '+state.driver);
   L.push('');
   L.push('סופקו '+R.del.length+' מתוך '+state.stops.length+' · 12 ק״ג: '+R.q[1]+' · 48 ק״ג: '+R.q[2]+(R.amg['5']?' · אמגזית 5: '+R.amg['5']:'')+(R.amg['2.5']?' · אמגזית 2.5: '+R.amg['2.5']:''));
+  if(R.mm) L.push('בבוקר במתקן (לפי ספירת היציאה, משאית '+state.truck+'): '+moveWords(R.mm));
   L.push('לפי תשלום (12/48): מזומן '+R.pb.cash[1]+'/'+R.pb.cash[2]+' · שיקים '+R.pb.cheque[1]+'/'+R.pb.cheque[2]+' · קבלות '+R.pb.rcpt[1]+'/'+R.pb.rcpt[2]);
   if(R.groups.length>1) R.groups.forEach(function(g){ var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length; L.push('• '+(g.from?'מיומן '+g.no+' (למשוך)':'יומן '+g.no)+': '+d+'/'+g.stops.length+' סופקו'); });
   L.push('');
@@ -1510,6 +1667,12 @@ function reportText(R){
   if(saf.length){ L.push(''); L.push('⚠️ בעיות בטיחות — לתאם טכנאי:'); saf.forEach(function(s){ L.push('• '+s.name+' ('+custNo(s)+'), '+addr(s)+' '+s.city+' — '+s.result.safety+(s.result.text?': '+s.result.text:'')); }); }
   var gaps=R.del.filter(payGap);
   if(gaps.length){ L.push(''); L.push('תשלום שונה מהסכום לגבייה:'); gaps.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+gapText(s)); }); }
+  var discs=R.del.filter(function(s){ return s.result.disc; });
+  if(discs.length){ L.push(''); L.push('הנחות:'); discs.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+discText(s.result.disc)); }); }
+  var pfor=R.del.filter(function(s){ return payForText(s.result.payment); });
+  if(pfor.length){ L.push(''); L.push('על מה שולם:'); pfor.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+payForText(s.result.payment)); }); }
+  var dns=R.del.filter(function(s){ return s.dn; });
+  if(dns.length){ L.push(''); L.push('🧾 תעודות משלוח: '+dns.map(function(s){ return dnNo(s.dn.no)+' '+s.name+(s.dn.signed?'':' (לא נחתמה)'); }).join(' · ')); }
   if(R.changed.length){ L.push(''); L.push('שינויים מההזמנה:'); R.changed.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+deliveredText(s)+(s.officeNote?' ('+s.officeNote+')':'')); }); }
   var notes=R.del.filter(function(s){ return s.officeNote && !changed(s); });
   if(notes.length){ L.push(''); L.push('הערות למשרד:'); notes.forEach(function(s){ L.push('• '+s.id+' '+s.name+' — '+s.officeNote); }); }
@@ -1524,7 +1687,7 @@ function reportText(R){
 /* FEEDBACK #44: one line per task, for the office */
 function taskLine(s){ var r=s.result||{};
   return 'מטלה — '+s.name+(s.city?' ('+s.city+')':'')+': '+(s.task||'')+(s.fake?' [הזמנה פיקטיבית — לא סופק גז]':'')+' → '+
-    (s.status==='delivered' ? 'בוצע'+(r.done?': '+r.done:'')+(r.payment && r.payment.method!=='none'?' · '+PAY[r.payment.method]+(r.payment.method==='later'?'':' '+money(r.payment.amount)):'') :
+    (s.status==='delivered' ? 'בוצע'+(r.done?': '+r.done:'')+(r.payment && r.payment.method!=='none'?' · '+(r.payment.method==='prepaid'?'שולם מראש במשרד':PAY[r.payment.method])+(r.payment.method==='later'||r.payment.method==='prepaid'?'':' '+money(r.payment.amount)):'') :
      s.status==='failed' ? 'לא בוצע — '+(r.reason||'')+(r.text?' ('+r.text+')':'') : 'לא טופל'); }
 function namesBy(R,method){ return R.del.filter(function(s){ return s.result.payment.method===method; }).map(function(s){ return s.name; }).join(', '); }
 /* a customer handed back cylinders lent to him, so the office must not charge him the deposit */
@@ -1539,7 +1702,7 @@ function cmp(exp,got){ return exp===got ? '<span class="match num">'+got+' ✓</
 function n2(v){ return v==null ? '' : String(v); }
 function docHead(title){
   return '<div class="hdr"><h1>'+title+'</h1><div class="f">שם הנהג: <b>'+esc(state.driver)+'</b></div><div class="f">יום: <b>'+esc(weekday(dayOf()))+'</b></div>'+
-    '<div class="f">תאריך: <b>'+esc(dayOf())+'</b></div><div class="f">יומן: <b>'+esc(journalNos().join(' + '))+'</b></div></div>';
+    '<div class="f">תאריך: <b>'+esc(dayOf())+'</b></div><div class="f">יומן: <b>'+esc(journalNos().join(' + '))+'</b></div>'+(state.truck?'<div class="f">משאית: <b>'+esc(state.truck)+'</b></div>':'')+'</div>';
 }
 function pair(label,a,b,strong){ return '<tr><td class="lbl2">'+label+'</td><td class="num'+(strong?' big2':'')+'">'+n2(a)+'</td><td class="num'+(strong?' big2':'')+'">'+n2(b)+'</td></tr>'; }
 function pairHead(){ return '<tr><td class="lbl2"></td><th>12 ק״ג</th><th>48 ק״ג</th></tr>'; }
@@ -1549,7 +1712,7 @@ function docHtml(){
   var p1='<div class="paper">'+docHead('דוח נהג יומי')+
     '<div class="row2"><table>'+pairHead()+pair('יתרות גז מיום קודם:', pv?pv.km||0:'', pv?pv.gm||0:'')+pair('יתרות מיכלים ריקים מיום קודם:', tot(pv,1), tot(pv,2))+'</table>'+
     (pv?'':'<div style="font-size:11.5px;color:#444;max-width:200px">אין סגירה קודמת באפליקציה — למלא ביד.</div>')+'</div>'+
-    '<div><b>האם הייתה העמסה במתקן:</b> '+(facOnly.length?'<b>כן</b> ('+facOnly.length+(facOnly.some(function(f){ return f.pink; })?', טופס ורוד צולם':'')+')':'לא')+'.  אם כן, יש לצרף טופס ורוד.</div>'+
+    '<div><b>האם הייתה העמסה במתקן:</b> '+(facOnly.length||R.mm?'<b>כן</b>'+(facOnly.length||state.pinkExit?' ('+[facOnly.length?facOnly.length+' ברישום':'', state.pinkExit||facOnly.some(function(f){ return f.pink; })?'טופס ורוד צולם':''].filter(Boolean).join(', ')+')':''):'לא')+'.  אם כן, יש לצרף טופס ורוד.</div>'+
     '<div class="sec2">פירוט פריקה / העמסה ברמפה ובמתקן</div>'+facLines(R)+
     '<div class="sec2">מכירה של קומפלטים</div>'+
     '<table class="wide"><thead><tr><th>צרכן</th><th>שם</th><th>12/48 ק״ג</th><th>כמות</th><th>אופן תשלום</th><th>הערות</th></tr></thead><tbody>'+
@@ -1601,14 +1764,18 @@ function orderRow(s){
   var extra = s.items.filter(function(i){ return i.code!=='1' && i.code!=='2' && (i.qty || (dl && i.actual)); })
     .map(function(i){ return (i.qty?'הוזמן '+i.qty+' ':'')+(dl?'סופק '+(i.actual||0)+' ':'')+itemLabel(i); });
   if(dl && payGap(s)) pay+='<div class="chg"><b>'+esc(gapText(s))+'</b></div>';
+  if(dl && r.disc) pay+='<div class="chg"><b>'+esc(discText(r.disc))+'</b></div>';
+  if(dl && payForText(py)) pay+='<div>על: '+esc(payForText(py))+'</div>';
   var note=[s.hot?'הזמנה חמה':'', s.reqId?(s.okBy?'הזמנה מהשטח — אושרה ע״י '+s.okBy:s.needsOk?'הזמנה מהשטח — לא אושרה':'הזמנה מהשטח'):'', s.fromJournal?'למשוך מיומן '+s.fromJournal:'', s.splitNote||'', s.status==='failed'?r.reason+(r.safety?': '+r.safety:'')+(r.text?' — '+r.text:''):'', extra.join(' · '),
     s.kind==='task' ? '🛠 מטלה: '+(s.task||'')+(s.fake?' — הזמנה פיקטיבית, לא סופק גז':'')+(dl && r.done?' · בוצע: '+r.done:'') : '',
-    dl && r.loan && (r.loan[1]||r.loan[2]) ? 'החזיר מושאלים (פיקדון): '+[1,2].filter(function(k){ return r.loan[k]; }).map(function(k){ return r.loan[k]+'×'+(k===1?'12':'48'); }).join(', ') : '', s.officeNote||''].filter(Boolean).join(' · ');
+    dl && r.loan && (r.loan[1]||r.loan[2]) ? 'החזיר מושאלים (פיקדון): '+[1,2].filter(function(k){ return r.loan[k]; }).map(function(k){ return r.loan[k]+'×'+(k===1?'12':'48'); }).join(', ') : '',
+    dl && s.dn ? '🧾 ת״מ '+dnNo(s.dn.no)+(s.dn.signed?' — נחתמה':' — לא נחתמה (לא בבית)') : '', (s.dnVoid||[]).length ? 'ת״מ '+s.dnVoid.map(dnNo).join(', ')+' בוטלה' : '', s.officeNote||''].filter(Boolean).join(' · ');
   return '<tr'+(!dl?' class="warn2"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
     '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(note)+'</td></tr>';
 }
 function facLines(R){
   var L=[];
+  if(R.mm) L.push('<b>בבוקר במתקן</b> (ספירת היציאה מול הסגירה של המשאית ב־'+esc(R.prev.date||'')+'): '+esc(moveWords(R.mm)));
   R.fac.forEach(function(f){
     L.push(esc(f.time)+' · '+esc(mvText(f).join(' · ')||(f.where==='רמפה'?'מחסן':'מתקן')+' — בלי שינוי')+(f.swap?' · הוחלפה משאית'+(f.truck?' ל־'+esc(f.truck):''):'')+(f.note?' · '+esc(f.note):''));
   });
@@ -1626,6 +1793,9 @@ function autoNotes(R){
   R.fail.filter(function(s){ return s.result.reason===SAFETY; }).forEach(function(s){
     L.push('<b style="color:#c0392b">⚠️ בעיית בטיחות — לתאם טכנאי: '+esc(s.name)+' ('+esc(custNo(s))+'), '+esc(addr(s))+' '+esc(s.city)+' — '+esc(s.result.safety)+(s.result.text?': '+esc(s.result.text):'')+'</b>'); });
   R.del.filter(payGap).forEach(function(s){ L.push('<b>'+esc(s.name)+' ('+esc(custNo(s))+'): '+esc(gapText(s))+'</b>'); });
+  R.del.filter(function(s){ return s.result.disc; }).forEach(function(s){ L.push('<b>'+esc(s.name)+' ('+esc(custNo(s))+'): '+esc(discText(s.result.disc))+'</b>'); });
+  var dns=R.del.filter(function(s){ return s.dn; });
+  if(dns.length) L.push('🧾 תעודות משלוח: '+esc(dns.map(function(s){ return dnNo(s.dn.no)+' '+s.name+(s.dn.signed?'':' (לא נחתמה)'); }).join(' · ')));
   if(R.amg['5']||R.amg['2.5']) L.push('אמגזיות שסופקו: '+(R.amg['5']?R.amg['5']+'×5 ק״ג ':'')+(R.amg['2.5']?R.amg['2.5']+'×2.5 ק״ג':''));
   var nc=R.fail.filter(function(s){ return s.result.cancelled; }).length;
   if(R.fail.length-nc) L.push('לא סופקו: '+(R.fail.length-nc)+' (פירוט בנספח)');
@@ -1753,7 +1923,7 @@ async function sharePdf(){
 /* yesterday's balances, in the paper form's own two rows. Filled from the last close on this phone; typing here
    overrides it (the first day on the app, a day closed on paper, another phone). */
 function prevCard(R){
-  var v=R.prev && R.prev.v || null, src=state.prevManual ? 'הוזן ידנית' : R.prev ? 'מהסגירה של '+(R.prev.date||'') : '';
+  var v=R.prev && R.prev.v || null, src=state.prevManual ? 'הוזן ידנית' : R.prev ? 'מהסגירה של '+(R.prev.plate?'משאית '+R.prev.plate+' · ':'')+(R.prev.date||'') : '';
   var f=function(id,val,label){ return '<input class="cin num'+(v?' has':'')+'" data-prev="'+id+'" inputmode="numeric" autocomplete="off" aria-label="'+label+'" value="'+(v?val:'')+'">'; };
   return '<section class="card"><div class="sec" style="margin:0"><h3>יתרות מיום קודם</h3>'+(src?'<span class="tag t-info">'+esc(src)+'</span>':'')+'</div>'+
     (v?'':'<p class="hint">אין סגירה קודמת באפליקציה. מעתיקים מהדוח של אתמול — בלי זה אין פתיחה ואין התאמת מלאי.</p>')+
@@ -1816,7 +1986,9 @@ async function closeDay(){
     ob.push({id:id, meta:{id:id, iso:summ.iso, date:summ.date, journals:summ.journals, driver:state.driver, del:summ.del, n:summ.n, cash:R.t.cash, cheque:R.t.cheque, nq:R.t.nq,
       later:R.t.later, unpaid:R.t.unpaid, handover:state.handover, gap:hoGap(R), text:reportText(R)}});
     await idbPut('kv','outbox',ob);
-    if(R.eve){ try{ localStorage.setItem('gazgal-last-close', JSON.stringify({date:dayOf(), v:R.eve.v, journal:state.journal})); }catch(e){} }
+    /* no end-of-day count: the truck still gets a closing — what it should hold by the app — so tomorrow goes on from it */
+    if(state.truck && !R.eve && R.exp) truckSave(state.truck, {id:'C'+Date.now(), v:R.exp, moment:'סוף יום (מחושב, בלי ספירה)', time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})});
+    if(R.eve){ try{ localStorage.setItem('gazgal-last-close', JSON.stringify({date:dayOf(), v:R.eve.v, journal:state.journal, plate:state.truck||''})); }catch(e){} }
   }
   state=migrate(fresh()); state.memory=mem; state.start=start; photos={}; savePhotos(); save();
   sendLive(true); setTimeout(flushOutbox, 1500);
@@ -1873,7 +2045,11 @@ function dItems(c){
     var qty=ex?ex.qty:0; if(qty || draft.q[code]) out.push({code:code, desc:ex?ex.desc:(ITEM_NAME[code]||code), qty:qty, price:dPrice(c,code), actual:draft.q[code]||0}); });
   return out;
 }
-function dAmount(c){ return Math.round((totalOf({items:dItems(c), discGross:c.discGross}, true)+(draft && draft.extraAmt || 0))*100)/100; }
+/* the price list amount; dAmount is what is collected — lower only with a discount and its reason (office feedback מ4) */
+function dBase(c){ return Math.round((totalOf({items:dItems(c), discGross:c.discGross}, true)+(draft && draft.extraAmt || 0))*100)/100; }
+function dAmount(c){ var b=dBase(c), p=draft && draft.disc; return p!=null && p>=0 && p<b ? p : b; }
+function payForText(p){ return p ? [(p.for||[]).join(', '), p.forText||''].filter(Boolean).join(' — ') : ''; }
+function discText(d){ return 'הנחה של '+money(Math.round((d.list-d.price)*100)/100)+': '+money(d.list)+' ← '+money(d.price)+' · '+d.reason; }
 function dItemsHtml(c){
   var codes=codesOf(c), gas=codes.filter(function(k){ return !/^dep/.test(k); }), dep=codes.filter(function(k){ return /^dep/.test(k); });
   var add=ADDABLE.filter(function(k){ return codes.indexOf(k)<0; }).concat(['dep1','dep2'].filter(function(k){ return codes.indexOf(k)<0; }));
@@ -1888,7 +2064,9 @@ function dItemsHtml(c){
 }
 function refreshAmt(){
   var c=draft && draft.stop && byId(draft.stop); if(!c) return;
-  var a=document.getElementById('dAmt'); if(a) a.textContent=money(dAmount(c));
+  var a=document.getElementById('dAmt'), da=dAmount(c), db=dBase(c);
+  if(a) a.innerHTML=money(da)+(da<db?' <small style="font-family:var(--body);font-size:14px;text-decoration:line-through">'+money(db)+'</small>':'');
+  var dl=document.getElementById('discList'); if(dl) dl.textContent=money(db);
   var ca=document.getElementById('chqAmt'); if(ca) ca.value=dAmount(c);
   var ka=document.getElementById('cashAmt'); if(ka && !ka.dataset.touched) ka.value=dAmount(c);
 }
@@ -1896,11 +2074,16 @@ function openSheet(kind,preset){
   var c=(preset && byId(preset)) || cur(), html='';
   if(kind==='count'){
     var pr=(preset||'').split('|'), pt=pr[0]||'me', mo=pr[1]||nextMoment(pt);
-    draft={point:pt, pointText:'', moment:mo, v:{}};
+    draft={point:pt, pointText:'', moment:mo, v:{}, plate:myPlate()};
     html='<h2>ספירת מלאי</h2>'+
     '<div class="field"><span class="lbl">איפה סופרים</span><div class="chips" role="group" aria-label="נקודת ספירה">'+
       ['me','eyal','ramp','other'].map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+POINT_BTN[k]+'</button>'; }).join('')+'</div>'+
       '<input class="inp" id="cOther" placeholder="שם הנקודה" autocomplete="off" hidden></div>'+
+    /* יומן משאית: the count belongs to a truck (licence plate), so whoever takes it next goes on from it */
+    '<div class="field" id="cTruck"'+(pt==='me'?'':' hidden')+'><span class="lbl">מספר רישוי של המשאית</span>'+
+      (plates().length?'<div class="chips" role="group" aria-label="משאית">'+plates().slice(0,4).map(function(p){ return '<button type="button" class="chip num" data-cplate="'+esc(p)+'" aria-pressed="'+(p===draft.plate)+'">'+esc(p)+'</button>'; }).join('')+'</div>':'')+
+      '<input class="inp num" id="cPlate" inputmode="numeric" autocomplete="off" placeholder="מספר רישוי (ספרות בלבד)" value="'+esc(draft.plate)+'">'+
+      '<input class="inp num" id="cKm" inputmode="numeric" autocomplete="off" placeholder="ק״מ במד (לא חובה — לטיפולים)"></div>'+
     '<div class="field"><span class="lbl">מתי</span><div class="chips" role="group" aria-label="מתי">'+
       MOMENTS.map(function(m){ return '<button type="button" class="chip" data-cmom="'+m+'" aria-pressed="'+(m===mo)+'">'+m+'</button>'; }).join('')+'</div></div>'+
     '<div class="cgrid"><span></span><span class="h">גדול · 48</span><span class="h">קטן · 12</span>'+
@@ -1989,6 +2172,10 @@ function openSheet(kind,preset){
       return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+'</div>'+
     '<p class="hint">אם החיוג לא נפתח בלחיצה, המספר מופיע כאן להקלדה.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   }
+  if(kind==='dn'){ html=dnSheet(c); }
+  if(kind==='fuel'){ html=fuelSheet(); }
+  if(kind==='fault'){ html=faultSheet(); }
+  if(kind==='sos'){ html=sosSheet(); }
   if(kind==='deliver' && c && c.kind==='task'){ html=taskDoneSheet(c); kind=''; }
   if(kind==='task'){ html=newTaskSheet(); }
   if(kind==='mktask'){ html=mkTaskSheet(c); }
@@ -2007,7 +2194,7 @@ function openSheet(kind,preset){
   }
   if(kind==='deliver'){
     var md=mode(c), dpt=ptOf(c), codes=codesOf(c), payer=splitPayer(c);
-    draft={stop:c.id, q:{}, e:{}, loan:{1:0,2:0}, extra:[], price:{}, method:null, cheque:null, stand:null, paidBy:payer?payer.id:null, extraAmt:payer?0:splitRest(c)};
+    draft={stop:c.id, q:{}, e:{}, loan:{1:0,2:0}, extra:[], price:{}, method:null, cheque:null, stand:null, paidBy:payer?payer.id:null, extraAmt:payer?0:splitRest(c), pf:[], disc:null, wantDn:false};
     codes.forEach(function(code){ draft.q[code]=ordered(c,code); });
     draft.e[1]=draft.q['1']; draft.e[2]=draft.q['2'];
     var payOpts = md==='verify' ? ['cash','cheque','office','later','prepaid','unpaid'] : ['cash','cheque','office','later','unpaid'];
@@ -2021,8 +2208,17 @@ function openSheet(kind,preset){
       ? '<div class="sum"><span>לגבות</span><span class="big num" id="dAmt">'+money(dAmount(c))+'</span></div>'+
         (draft.extraAmt?'<div class="note">הזמנה מפוצלת: הסכום כולל גם את '+esc(splitSibs(c).filter(function(x){ return x.status==='pending'; }).map(function(x){ return x.point||'הנקודה השנייה'; }).join(', '))+' ('+money(draft.extraAmt)+'). גובים פעם אחת, כאן.</div>':'')+
         (md==='verify'?'<div class="note">'+(/שולם/.test(c.note||'')?'בהערה כתוב ״שולם״. אם הלקוח כבר שילם — בחר ״שולם מראש״.':'ההזמנה לא מסומנת כשולמה. לוודא עם הלקוח.')+'</div>':'')+
+        /* office feedback מ4: a discount is allowed, but only with its reason — and it is marked for the clerk */
+        '<details class="amg"><summary>💸 מחיר כולל הנחה</summary>'+
+          '<div class="field"><label for="discPrice" class="lbl">כמה הלקוח משלם אחרי ההנחה (₪, כולל מע״מ)</label><input class="inp num" id="discPrice" inputmode="decimal" autocomplete="off"></div>'+
+          '<div class="field"><label for="discWhy" class="lbl">סיבת ההנחה — חובה</label><input class="inp" id="discWhy" autocomplete="off" placeholder="למשל: אישר גדי בטלפון · פיצוי על איחור"></div>'+
+          '<p class="hint">לפי המחירון: <b id="discList" class="num">'+money(dBase(c))+'</b>. ההנחה מסומנת לפקידה בדוח ובדף המשרד.</p></details>'+
         '<div class="field"><span class="lbl">איך שולם?</span><div class="chips" role="group" aria-label="אמצעי תשלום">'+
         payOpts.map(function(k){ return '<button type="button" class="chip" data-pay="'+k+'" aria-pressed="false">'+PAY[k]+'</button>'; }).join('')+'</div></div>'+
+        /* office feedback מ2: what the money was for — a complete cylinder, someone else's cylinder, an old debt */
+        '<div class="field"><span class="lbl">על מה שולם (לא חובה)</span><div class="chips" role="group" aria-label="על מה שולם">'+
+        PAY_FOR.map(function(k){ return '<button type="button" class="chip" data-pfor="'+k+'" aria-pressed="false">'+k+'</button>'; }).join('')+'</div>'+
+        '<input class="inp" id="payFor" autocomplete="off" placeholder="פירוט — למשל: חוב מאוגוסט ₪200 (חובה ב״אחר״)"></div>'+
         /* FEEDBACK #22: what the customer really handed over — the price is not changed, only the money is recorded */
         '<div id="cashBox" hidden class="field"><label for="cashAmt" class="lbl">כמה התקבל בפועל</label><input class="inp num" id="cashAmt" inputmode="decimal" value="'+dAmount(c)+'">'+
         '<p class="hint">שילם פחות — נשאר חוב. שילם יותר (למשל חוב ישן) — עודף, הפקידה משייכת. המחיר עצמו לא משתנה.</p></div>'+
@@ -2038,6 +2234,8 @@ function openSheet(kind,preset){
     '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
     '<div class="field"><div class="chips"><button type="button" class="chip" data-nothome="1" aria-pressed="false">🏠 הלקוח לא היה בבית — סופק לעמדה</button></div>'+
       '<p class="hint">רק כשהלקוח כבר שילם ויש גישה למיכלים. לא שילם ואין מי שישלם — ״לא סופק״.</p></div>'+
+    '<div class="field"><div class="chips"><button type="button" class="chip" data-wantdn="1" aria-pressed="false">🧾 הלקוח מבקש תעודת משלוח</button></div>'+
+      '<p class="hint">אחרי האישור: חתימה על המסך, ועותק ללקוח בוואטסאפ.</p></div>'+
     '<div class="field"><label for="offNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="offNote" placeholder="מה שהיית כותב בעט על ההזמנה — נכנס לדוח לפקידה"></textarea></div>'+
     '<p class="err" id="dErr" hidden></p>'+
     '<button class="btn btn-ok" type="button" id="confirmDeliver">אישור אספקה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
@@ -2105,6 +2303,7 @@ function openSheet(kind,preset){
   if(kind==='count') updateCountMsg();
   if(kind==='office' && officeIn && officeIn.blob) runOffice();
   if(kind==='pair') pairStart();
+  if(kind==='dn' && c){ if(c.dn) layoutDn(); else initSig(); }
 }
 function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null; }
 function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; }
@@ -2129,12 +2328,27 @@ function saveCount(){
   var any=Object.keys(draft.v).some(function(k){ return draft.v[k]>0; });
   if(!any){ showErr('cErr','לא הוזן אף מספר.'); return; }
   if(draft.point==='other' && !draft.pointText){ showErr('cErr','כתוב את שם הנקודה.'); return; }
+  if(draft.point==='me' && plateOk(draft.plate).length<5){ showErr('cErr','כתוב את מספר הרישוי של המשאית.'); return; }
   var c={id:'C'+Date.now(), point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v,
     time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
+  var mv=null, prevT=null;
+  if(c.point==='me'){ c.plate=plateOk(draft.plate); lsSet('gazgal-my-truck', c.plate);
+    /* the morning exit count: the truck's last count (before today) becomes "יתרות מיום קודם", the difference is the facility */
+    if(c.moment==='יציאה'){
+      if(!state.truckPrev || state.truckPrev.plate!==c.plate){ var tp=trucks()[c.plate]; state.truckPrev = tp && tp.day!==dayOf() ? {date:tp.day, v:tp.v, moment:tp.moment, plate:c.plate} : null; }
+      state.truck=c.plate; prevT=state.truckPrev; mv=prevT ? truckMove(prevT.v, c.v) : null; }
+    else if(!state.truck) state.truck=c.plate;
+    truckSave(c.plate, c);
+    var ckm=parseInt(((document.getElementById('cKm')||{}).value||'').replace(/\D/g,''),10)||0;
+    if(ckm){ c.km=ckm; fleetQueue('km', c.plate, {km:ckm, moment:c.moment}); } }
   state.counts.push(c); save(); render();
   var msg=countMsg(c);
   draft={savedMsg:msg};
   document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשמר ✓</h2><div class="msg">'+esc(msg)+'</div>'+
+    (c.moment==='יציאה' && c.point==='me' ? (prevT
+      ? '<div class="okbox" style="color:var(--ink);background:var(--surface)"><b>🏭 מה קרה במתקן</b> — לפי הספירה הזאת מול הסגירה של משאית '+esc(c.plate)+' ('+esc(prevT.date)+'):<br><b>'+esc(moveWords(mv)||'אין שינוי')+'</b><br><span class="hint">להשוות לטופס הוורוד. לא תואם? טעות בספירה או במתקן — ספור שוב או סמן לפקידה.</span></div>'+
+        '<span class="lbl">הטופס הוורוד (לא חובה)</span>'+photoPick('pinkx','צלם טופס')
+      : '<div class="note">אין עדיין סגירה של משאית '+esc(c.plate)+' באפליקציה, אז אין ממה לחשב מה קרה במתקן. מהיום היא נשמרת, ומחר זה יעבוד לבד.</div>') : '')+
     '<a class="btn btn-ok linkbtn" href="https://wa.me/?text='+encodeURIComponent(msg)+'" target="_blank" rel="noopener">שלח לקבוצת הנהגים</a>'+
     '<p class="hint">וואטסאפ ייפתח עם ההודעה מוכנה. בוחרים את ״נהגים גז גל״ ושולחים.</p>'+
     '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" id="copyCount">העתק</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="count">ספירה נוספת</button></div>'+
@@ -2230,6 +2444,18 @@ function confirmDeliver(){
   if(!total){ showErr('dErr','לא סומנה כמות. אם לא סופק כלום, סמן ״לא סופק״.'); return; }
   var noPrice=dItems(c).filter(function(i){ return i.actual && !i.price; })[0];
   if(noPrice){ showErr('dErr','חסר מחיר ל'+ITEM_NAME[noPrice.code]+'.'); return; }
+  /* office feedback מ4: a discount needs a lower price and its reason */
+  var gv=function(id){ return ((document.getElementById(id)||{}).value||'').trim(); }, dRaw=gv('discPrice'), dWhy=gv('discWhy'), disc=null;
+  draft.disc=null;
+  if(dRaw && collects(c) && !draft.paidBy){
+    var dlist=dBase(c), dp=parseFloat(dRaw.replace(',','.'));
+    if(isNaN(dp) || dp<0){ showErr('dErr','המחיר אחרי ההנחה לא תקין.'); return; }
+    if(dp>=dlist){ showErr('dErr','המחיר אחרי ההנחה צריך להיות נמוך מ־'+money(dlist)+'. אין הנחה? מחק את המחיר.'); return; }
+    if(!dWhy){ showErr('dErr','כתוב את סיבת ההנחה — זה חובה.'); return; }
+    disc={list:dlist, price:Math.round(dp*100)/100, reason:dWhy}; draft.disc=disc.price;
+  }
+  var pfT=gv('payFor');
+  if(draft.pf.indexOf('אחר')>=0 && !pfT){ showErr('dErr','סימנת ״על מה שולם — אחר״: כתוב פירוט.'); return; }
   Object.keys(draft.price).forEach(function(k){ if(draft.price[k]>0) prices[k]=draft.price[k]; });
   try{ localStorage.setItem('gazgal-prices', JSON.stringify(prices)); }catch(e){}
   var items=dItems(c), amount=dAmount(c), pay={method:'none', amount:0};
@@ -2253,9 +2479,11 @@ function confirmDeliver(){
       if(kamt===0){ showErr('dErr','התקבל 0? בחר ״לא שולם״.'); return; }
       pay={method:'cash', amount:Math.round(kamt*100)/100, owed:amount};
     } else pay={method:draft.method, amount:amount};
+    if(pay.method!=='unpaid' && (draft.pf.length || pfT)){ pay.for=draft.pf.slice(); if(pfT) pay.forText=pfT; }
   }
   c.items=items; c.status='delivered';
   c.result={at:Date.now(), payment:pay, empties:{1:draft.e[1]||0, 2:draft.e[2]||0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
+  if(disc) c.result.disc=disc;
   if(draft.loan[1] || draft.loan[2]) c.result.loan={1:draft.loan[1], 2:draft.loan[2]};
   if(draft.paidBy) c.result.paidWith=draft.paidBy;
   else if(splitSibs(c).length && collects(c)) c.result.coversSplit=true;   /* the whole split order was paid here */
@@ -2271,7 +2499,9 @@ function confirmDeliver(){
   if(park || draft.geo) touchPlace(c.cust);
   if(draft.stand){ memPhotos[c.cust]=draft.stand; if(!/^hot-/.test(c.cust)){ state.memory[c.cust].ph=Date.now(); touchPlace(c.cust); standMark(c.cust, state.memory[c.cust].ph); standDirty(c.cust); } }
   if(draft.stand || draft.cheque) savePhotos();
-  after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : ''));
+  var wantDn=draft.wantDn;
+  after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : '')+(disc?' · עם הנחה':''));
+  if(wantDn) openSheet('dn', c.id);
 }
 function safetyMsg(s){
   var r=s.result;
@@ -2333,6 +2563,154 @@ function addStop(s, pos, what){
   after('נוספה: '+what+' · '+(state.phase==='route'?'בסוף הסבב':'תסודר עם כל השאר'));
 }
 
+/* ================= FEEDBACK #48: delivery note (תעודת משלוח) signed by the customer =================
+   Only when the customer asks for one. The app numbers them itself: a running number per driver, kept in the phone and
+   on the server, so a new phone goes on from the same number. With prices, under the company's name. The signature
+   stays in the phone, like a cheque photo. Customer not at home: no signature, and the note says so. */
+var sig=null;
+function dnNo(n){ return ('000'+n).slice(-4); }
+function dnSeq(){ return Math.max(+lsGet('gazgal-dn-seq',0)||0, state.dnMax||0, bot.dnSeq||0); }
+function dnNext(){ var n=dnSeq()+1; lsSet('gazgal-dn-seq',n); state.dnMax=n; bot.dnSeq=n; syncDn(); return n; }
+async function syncDn(){
+  if(!BOT_API || bot.status!=='active') return;
+  try{ var r=await botFetch('/api/dn'); if(!r.ok) return; var srv=+(await r.json()).n||0;
+    bot.dnSeq=Math.max(bot.dnSeq||0, srv);
+    if(dnSeq()>srv) await botFetch('/api/dn',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({n:dnSeq()})}); }catch(e){}
+}
+function dnSheet(c){
+  if(!c || c.status!=='delivered' || c.kind==='task') return '<h2>🧾 תעודת משלוח</h2><p style="margin:0">רק להזמנה שסופקה.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  if(c.dn) return dnDoneHtml(c);
+  var nh=/לא היה בבית/.test(c.officeNote||'');
+  draft={stop:c.id, dnNoSig:nh};
+  return '<h2>🧾 תעודת משלוח — '+esc(c.name)+'</h2>'+
+    '<div class="msg" style="font-weight:600">'+esc(dnLines(c).join('\n'))+'</div>'+
+    '<div class="chips" role="group" aria-label="חתימה"><button type="button" class="chip" data-dnmode="sig" aria-pressed="'+!nh+'">✍️ הלקוח חותם</button>'+
+      '<button type="button" class="chip" data-dnmode="nohome" aria-pressed="'+nh+'">🏠 הלקוח לא בבית — בלי חתימה</button></div>'+
+    '<div id="sigBox" class="field"'+(nh?' hidden':'')+'><span class="lbl">חתימת הלקוח — עם האצבע</span><canvas id="sigPad" class="sigpad" aria-label="משטח חתימה"></canvas>'+
+      '<button class="linkish" type="button" id="sigClear">נקה חתימה</button>'+
+      '<label for="dnName" class="lbl">שם החותם (לא חובה)</label><input class="inp" id="dnName" autocomplete="off" value="'+esc(c.name)+'"></div>'+
+    '<div class="field"><label for="dnNote">הערה בתעודה (לא חובה)</label><input class="inp" id="dnNote" autocomplete="off" placeholder="למשל: הושאר בעמדה מאחורי הבית"></div>'+
+    '<p class="hint">המספר נקבע כשמפיקים. אחר כך אפשר לשלוח שוב מ־🧾 ברשימת ״הושלמו״.</p>'+
+    '<p class="err" id="dnErr" hidden></p>'+
+    '<button class="btn btn-ok" type="button" id="issueDn">הפק תעודה</button><button class="btn btn-ghost btn-sm" type="button" data-close>לא עכשיו</button>';
+}
+function initSig(){
+  var cv=document.getElementById('sigPad'); if(!cv || !cv.getBoundingClientRect().width) return;
+  var b=cv.getBoundingClientRect(), k=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+  cv.width=Math.round(b.width*k); cv.height=Math.round(b.height*k);
+  var g=cv.getContext('2d'); g.scale(k,k); g.lineWidth=2.6; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle=g.fillStyle='#111';
+  sig={cv:cv, g:g, drawn:false, last:null};
+  var at=function(e){ var r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; };
+  cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} sig.last=at(e); g.beginPath(); g.arc(sig.last.x,sig.last.y,1.3,0,7); g.fill(); sig.drawn=true; });
+  cv.addEventListener('pointermove',function(e){ if(!sig.last) return; e.preventDefault(); var p=at(e); g.beginPath(); g.moveTo(sig.last.x,sig.last.y); g.lineTo(p.x,p.y); g.stroke(); sig.last=p; });
+  ['pointerup','pointercancel','pointerleave'].forEach(function(t){ cv.addEventListener(t,function(){ sig.last=null; }); });
+}
+function issueDn(){
+  var c=byId(draft.stop); if(!c || c.dn) return;
+  var nh=draft.dnNoSig, note=(document.getElementById('dnNote').value||'').trim();
+  if(!nh && !(sig && sig.drawn)){ showErr('dnErr','הלקוח עוד לא חתם. לא בבית? בחר ״בלי חתימה״.'); return; }
+  c.dn={no:dnNext(), at:Date.now(), signed:!nh, signer:nh?'':(document.getElementById('dnName').value||'').trim(), note:note};
+  if(!nh){ photos['sig-'+c.id]=sig.cv.toDataURL('image/png'); savePhotos(); }
+  sig=null; save(); render();
+  document.querySelector('.sheet').innerHTML='<div class="grab"></div>'+dnDoneHtml(c); layoutDn();
+  toast('🧾 תעודת משלוח '+dnNo(c.dn.no)+' הופקה');
+}
+function dnMobile(c){ return contacts(c).filter(function(x){ return /^05/.test(x.num); })[0] || null; }
+function dnDoneHtml(c){
+  var mob=dnMobile(c);
+  return '<h2>🧾 תעודת משלוח '+dnNo(c.dn.no)+' — '+esc(c.name)+'</h2>'+
+    '<div class="docwrap" id="dnWrap"><div id="dnPage">'+dnPaper(c)+'</div></div>'+
+    '<button class="btn btn-accent" type="button" id="dnShare" data-dn="'+esc(c.id)+'">📤 שלח ללקוח (PDF)</button>'+
+    (mob?'<a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent(dnText(c))+'" target="_blank" rel="noopener">💬 פרטי התעודה בטקסט לוואטסאפ של הלקוח</a>':'')+
+    '<button class="btn btn-ghost btn-sm" type="button" id="dnSave" data-dn="'+esc(c.id)+'">⬇ שמור PDF בטלפון</button>'+
+    '<p class="hint">״שלח ללקוח״ פותח את השיתוף של הטלפון — בוחרים וואטסאפ ואת הלקוח. אם הלקוח לא שמור באנשי הקשר: ״פרטי התעודה בטקסט״ פותח איתו צ׳אט, ושם מצרפים את ה־PDF.</p>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+}
+function layoutDn(){ var w=document.getElementById('dnWrap'), p=document.getElementById('dnPage'); if(!w||!p) return; p.style.zoom=Math.min(1,w.clientWidth/794); }
+function dnItemName(i){ return KG[i.code] ? 'גז — מיכל '+KG[i.code]+' ק״ג' : ITEM_NAME[i.code] || itemLabel(i); }
+/* the money on the note: list price per line, the journal's discount, the driver's discount (with its reason), total */
+function dnMoney(c){
+  var r=c.result||{}, lines=[], sum=0;
+  c.items.forEach(function(i){ var a=i.actual||0; if(!a) return; var t=Math.round(a*i.price*100)/100; sum+=t; lines.push({name:dnItemName(i), n:a, price:i.price, t:t}); });
+  var net=totalOf(c,true), jd=Math.round((sum-net)*100)/100, dd=r.disc ? Math.round((r.disc.list-r.disc.price)*100)/100 : 0;
+  return {lines:lines, sum:Math.round(sum*100)/100, jd:jd>0.009?jd:0, dd:dd, total:Math.max(0,Math.round((net-dd)*100)/100), reason:r.disc?r.disc.reason:''};
+}
+function dnPayText(c){
+  var r=c.result||{}, p=r.payment||{method:'none'}, md=mode(c);
+  if(r.paidWith){ var pw=byId(r.paidWith); return 'שולם בנקודה '+((pw&&pw.point)||'הראשונה'); }
+  var s = p.method==='none' ? (md==='credit'?'לקוח אשראי — חיוב דרך המשרד':md==='standing'?'הוראת קבע':'שולם מראש') :
+    p.method==='prepaid' ? 'שולם מראש' : p.method==='later' ? 'לתשלום במשרד' : p.method==='unpaid' ? 'לא שולם' :
+    'שולם '+PAY[p.method]+' '+money(p.amount)+(p.method==='cheque' && p.no?' (צ׳ק מס׳ '+p.no+')':'');
+  return s+(r.coversSplit?' — כולל הנקודה השנייה של ההזמנה':'');
+}
+function dnLines(c){
+  var m=dnMoney(c), r=c.result||{}, L=m.lines.map(function(l){ return l.n+' × '+l.name+' — '+money(l.t); });
+  if(m.jd) L.push('הנחה לפי ההזמנה: '+money(m.jd));
+  if(m.dd) L.push('הנחה ('+m.reason+'): '+money(m.dd));
+  L.push('סה״כ (כולל מע״מ): '+money(m.total)); L.push(dnPayText(c));
+  var e=r.empties||{}; if(e[1]||e[2]) L.push('ריקים שנאספו: '+[e[1]?e[1]+'×12':'', e[2]?e[2]+'×48':''].filter(Boolean).join(' · '));
+  return L;
+}
+function dnText(c){
+  var d=c.dn||{};
+  return COMPANY+' — תעודת משלוח מס׳ '+dnNo(d.no)+'\n'+new Date(d.at||Date.now()).toLocaleDateString('he-IL')+' · נהג: '+(state.driver||'')+'\n'+
+    'לכבוד: '+c.name+(custNo(c)?' (צרכן '+custNo(c)+')':'')+'\n'+dnLines(c).join('\n')+'\n'+
+    (d.signed ? 'נחתם'+(d.signer?' ע״י '+d.signer:'') : 'הלקוח לא היה בבית — לא נחתם')+(d.note?'\n'+d.note:'')+'\nתודה!';
+}
+function dnPaper(c){
+  var d=c.dn||{}, r=c.result||{}, m=dnMoney(c), e=r.empties||{}, ln=r.loan||{}, sg=photos['sig-'+c.id];
+  var at=new Date(d.at||Date.now()), row=function(a,b,strong){ return '<tr'+(strong?' style="font-weight:800;font-size:15px"':'')+'><td colspan="3" style="text-align:start">'+a+'</td><td class="num">'+b+'</td></tr>'; };
+  return '<div class="paper dnp">'+
+    '<div class="hdr"><div><h1>'+esc(COMPANY)+'</h1><div class="f">ח.פ <b>'+COMPANY_ID+'</b></div></div>'+
+      '<div style="text-align:end"><h1>תעודת משלוח</h1><div class="f">מס׳ <b class="num" style="font-size:18px">'+(d.no?dnNo(d.no):'—')+'</b></div></div></div>'+
+    '<div class="row2" style="flex-wrap:wrap;gap:6px 26px"><div>תאריך: <b>'+esc(at.toLocaleDateString('he-IL'))+' '+esc(at.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}))+'</b></div>'+
+      '<div>נהג: <b>'+esc(state.driver||'')+'</b></div>'+(c.orderNo||!c.hot?'<div>הזמנה: <b>'+esc(c.orderNo||c.id)+'</b></div>':'')+'</div>'+
+    '<div style="font-size:14px;margin-bottom:10px">לכבוד: <b>'+esc(c.name)+'</b>'+(custNo(c)?' · צרכן <b>'+esc(custNo(c))+'</b>':'')+'<br>'+esc(addr(c))+(c.city?', '+esc(c.city):'')+(c.point?' ('+esc(c.point)+')':'')+'</div>'+
+    '<table class="wide" style="font-size:13.5px"><thead><tr><th style="text-align:start">פריט</th><th>כמות</th><th>מחיר ליחידה</th><th>סה״כ</th></tr></thead><tbody>'+
+      m.lines.map(function(l){ return '<tr><td>'+esc(l.name)+'</td><td class="c num">'+l.n+'</td><td class="c num">'+money(l.price)+'</td><td class="c num">'+money(l.t)+'</td></tr>'; }).join('')+
+      (m.jd||m.dd ? row('סה״כ לפי מחירון', money(m.sum)) : '')+
+      (m.jd ? row('הנחה לפי ההזמנה', '<span dir="ltr">−'+money(m.jd)+'</span>') : '')+
+      (m.dd ? row('הנחה — '+esc(m.reason), '<span dir="ltr">−'+money(m.dd)+'</span>') : '')+
+      row('סה״כ (כולל מע״מ)', money(m.total), true)+
+    '</tbody></table>'+
+    '<div style="margin-top:8px;font-size:14px"><b>תשלום:</b> '+esc(dnPayText(c))+'</div>'+
+    (e[1]||e[2]||ln[1]||ln[2] ? '<div style="font-size:14px"><b>ריקים שנאספו:</b> '+esc([e[1]?e[1]+' × 12 ק״ג':'', e[2]?e[2]+' × 48 ק״ג':''].filter(Boolean).join(' · ')||'—')+
+      (ln[1]||ln[2] ? ' · <b>הוחזרו מיכלים מושאלים:</b> '+esc([ln[1]?ln[1]+' × 12':'', ln[2]?ln[2]+' × 48':''].filter(Boolean).join(' · ')) : '')+'</div>' : '')+
+    (d.note ? '<div style="font-size:14px"><b>הערה:</b> '+esc(d.note)+'</div>' : '')+
+    '<div style="margin-top:14px;display:flex;gap:30px;align-items:flex-end"><div style="flex:1"><div style="font-size:13px">חתימת הלקוח — קיבלתי את המפורט לעיל:</div>'+
+      (d.signed && sg ? '<img src="'+sg+'" alt="חתימת הלקוח" style="height:90px;max-width:100%;display:block">' :
+        '<div style="height:60px;display:flex;align-items:center;font-weight:700">'+(d.no?'הלקוח לא היה בבית — לא נחתם':'')+'</div>')+
+      '<div style="border-top:1.2px solid #000;font-size:12.5px;padding-top:2px">'+esc(d.signer||'')+'</div></div>'+
+      '<div style="flex:1;font-size:12.5px;border-top:1.2px solid #000;padding-top:2px">חתימת הנהג: '+esc(state.driver||'')+'</div></div>'+
+    '<div class="foot"><span>אינה חשבונית מס · המחירים כוללים מע״מ</span><span>הופק באפליקציית הנהג · '+esc(stamp())+'</span></div>'+
+  '</div>';
+}
+function dnName(c){ return 'תעודת-משלוח-'+dnNo(c.dn.no)+'.pdf'; }
+async function dnPdf(c){
+  await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
+  var pr=document.getElementById('printRoot'); pr.innerHTML=dnPaper(c); pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
+  try{
+    var cv=await window.html2canvas(pr.querySelector('.paper'),{scale:2, backgroundColor:'#ffffff', logging:false}), h=Math.round(210*cv.height/cv.width);
+    var pdf=new window.jspdf.jsPDF({unit:'mm', format:[210,h], orientation:h>=210?'portrait':'landscape', compress:true});
+    pdf.addImage(cv.toDataURL('image/jpeg',0.88),'JPEG',0,0,210,h);
+    return pdf.output('blob');
+  } finally { pr.style.cssText=''; pr.innerHTML=''; }
+}
+async function dnShare(id, saveOnly){
+  var c=byId(id); if(!c || !c.dn) return;
+  var btn=document.getElementById(saveOnly?'dnSave':'dnShare'), lbl=btn && btn.textContent; if(btn){ btn.disabled=true; btn.textContent='מכין PDF…'; }
+  try{
+    var file=new File([await dnPdf(c)], dnName(c), {type:'application/pdf'});
+    if(!saveOnly && navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:dnName(c)}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
+    } else {
+      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=dnName(c); document.body.appendChild(a); a.click(); a.remove();
+      toast(saveOnly?'נשמר בטלפון — בתיקיית ההורדות':'ה־PDF ירד לטלפון. שלח אותו ללקוח מהקבצים.');
+    }
+  }catch(e){ toast('לא הצלחתי להכין PDF. נסה שוב.'); }
+  if(btn){ btn.disabled=false; btn.textContent=lbl; }
+}
+
 /* ================= FEEDBACK #44: tasks — a stop with no gas ("חיבור מנגל", a check, a pickup) =================
    From the office page, typed by the driver, or a "הזמנה פיקטיבית" in the journal (Bashan forces a gas line; the
    real job is in the free text) turned into a task. It goes into the route like any stop and into the report. */
@@ -2341,8 +2719,14 @@ function taskBtn(s){
   if(s.kind==='task') return s.fake ? '<button class="linkish" type="button" data-untask="'+esc(s.id)+'">↩ זו כן הזמנת גז רגילה</button>' : '';
   return '<button class="linkish" type="button" data-sheet="mktask" data-preset="'+esc(s.id)+'">🛠 זו מטלה, לא גז (הזמנה פיקטיבית)</button>';
 }
-function durChips(){ return '<div class="field"><span class="lbl">כמה זמן בערך</span><div class="chips">'+[10,20,30,60].map(function(m){ return '<button type="button" class="chip" data-tdur="'+m+'" aria-pressed="'+(draft.dur===m)+'">'+m+' דק׳</button>'; }).join('')+'</div>'+
+/* office feedback מ8: "לא ידוע" is a choice too (dur 0) — the estimate then uses 20 minutes */
+function durChips(){ return '<div class="field"><span class="lbl">כמה זמן בערך</span><div class="chips">'+[10,20,30,60].map(function(m){ return '<button type="button" class="chip" data-tdur="'+m+'" aria-pressed="'+(draft.dur===m)+'">'+m+' דק׳</button>'; }).join('')+
+  '<button type="button" class="chip" data-tdur="0" aria-pressed="'+(draft.dur===0)+'">לא ידוע</button></div>'+
   '<p class="hint">נכנס להערכת ההגעה שהמשרד רואה.</p></div>'; }
+function durText(s){ return s.du ? 'זמן לא ידוע' : '~'+(s.dur||20)+' דק׳'; }
+/* office feedback מ7: a task's payment is one of three — collect ₪ / paid in advance at the office / no payment */
+var TASK_PAY = {collect:'לגבות ₪', prepaid:'שולם מראש במשרד', none:'ללא תשלום'};
+function taskPayText(s){ return s.taskPay==='prepaid' ? 'שולם מראש במשרד' : s.taskAmt ? 'לגבות '+money(s.taskAmt) : 'ללא תשלום'; }
 function mkTaskSheet(c){
   draft={stop:c.id, dur:20};
   return '<h2>🛠 '+esc(c.name)+' — מטלה</h2><p class="hint">הזמנה פיקטיבית: ביומן יש שורת גז, אבל העבודה היא מה שכתוב בהערה. הגז לא יסופק, ובדוח יסומן ״הזמנה פיקטיבית — לא סופק גז״.</p>'+
@@ -2350,37 +2734,42 @@ function mkTaskSheet(c){
     '<p class="err" id="mkErr" hidden></p><button class="btn btn-accent" type="button" id="confirmMkTask">הפוך למטלה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
 function newTaskSheet(){
-  draft={dur:20, pos:'map', am:false};
+  draft={dur:20, pos:'map', am:false, tpay:'none'};
   var f=function(id,l,extra){ return '<div class="field"><label for="'+id+'">'+l+'</label><input class="inp'+(extra||'')+'" id="'+id+'" autocomplete="off"></div>'; };
   return '<h2>🛠 מטלה חדשה</h2><p class="hint">עצירה בלי גז — התקנה, בדיקה, איסוף. נכנסת לסידור ההליכה, להערכה של המשרד ולדוח.</p>'+
     '<div class="field"><label for="tText">מה צריך לעשות</label><textarea class="inp" id="tText" placeholder="למשל: חיבור מנגל לצובר, בדיקת דליפה"></textarea></div>'+
     f('tName','שם הלקוח')+'<div class="grid2">'+f('tPhone','טלפון',' num')+f('tCust','מס׳ צרכן (אם יש)',' num')+'</div>'+
-    '<div class="grid2">'+f('tStreet','רחוב')+f('tHouse','מספר',' num')+'</div>'+f('tCity','יישוב')+
+    '<div class="grid2">'+f('tStreet','רחוב')+f('tHouse','מספר',' num')+'</div>'+'<div class="grid2">'+f('tEnt','כניסה')+f('tApt','דירה')+'</div>'+f('tCity','יישוב')+
     durChips()+
-    '<div class="field"><label for="tAmt0">לגבות (לא חובה, ₪)</label><input class="inp num" id="tAmt0" inputmode="decimal" autocomplete="off"></div>'+
+    '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+['collect','prepaid','none'].map(function(k){ return '<button type="button" class="chip" data-tpay0="'+k+'" aria-pressed="'+(k==='none')+'">'+TASK_PAY[k]+'</button>'; }).join('')+'</div>'+
+      '<input class="inp num" id="tAmt0" inputmode="decimal" autocomplete="off" placeholder="כמה לגבות (₪)" hidden></div>'+
     '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['map','איפה שהכי קרוב במסלול'],['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='map')+'">'+x[1]+'</button>'; }).join('')+
       '<button type="button" class="chip" data-tam="1" aria-pressed="false">🌅 בבוקר</button></div></div>'+
     '<p class="err" id="tErr0" hidden></p><button class="btn btn-accent" type="button" id="confirmNewTask">הוסף לסבב</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
 function taskStop(d){
   var cust=String(d.cust||'').replace(/\D/g,'');
-  return {id:'T'+String(Date.now()).slice(-7)+Math.floor(Math.random()*10), kind:'task', task:d.text, dur:+d.dur||20, taskAmt:+d.amount||0, am:!!d.am, officeTask:d.officeTask||'',
-    row:999, cust:cust||('hot-'+Date.now()), name:d.name||'מטלה', street:d.street||'', house:d.house||'', ent:'', apt:'', city:d.city||'', type:'באספקה', paidFlag:false, discGross:0,
+  var tp = d.pay==='prepaid' || d.pay==='none' ? d.pay : (+d.amount>0 ? 'collect' : 'none');
+  return {id:'T'+String(Date.now()).slice(-7)+Math.floor(Math.random()*10), kind:'task', task:d.text, dur:+d.dur||20, du:!!d.du || !+d.dur, taskPay:tp, taskAmt:tp==='collect'?(+d.amount||0):0, am:!!d.am, officeTask:d.officeTask||'',
+    row:999, cust:cust||('hot-'+Date.now()), name:d.name||'מטלה', street:d.street||'', house:d.house||'', ent:d.ent||'', apt:d.apt||'', city:d.city||'', type:'באספקה', paidFlag:false, discGross:0,
     items:[], note:d.officeTask?'מהמשרד':'', phones:[d.phone||'',''], status:'pending', result:null, hot:true, journal:state.journal, fromJournal:''};
 }
 function confirmNewTask(){
   var g=function(id){ return (document.getElementById(id).value||'').trim(); }, text=g('tText'), city=g('tCity');
   if(!text){ showErr('tErr0','כתוב מה צריך לעשות.'); return; }
   if(!city){ showErr('tErr0','חסר יישוב — בלעדיו אין איפה לשים את המטלה במסלול.'); return; }
-  var st=taskStop({text:text, name:g('tName'), phone:g('tPhone'), cust:g('tCust'), street:g('tStreet'), house:g('tHouse'), city:city, dur:draft.dur, amount:parseFloat(g('tAmt0').replace(',','.'))||0, am:draft.am});
+  var amt=parseFloat(g('tAmt0').replace(',','.'))||0;
+  if(draft.tpay==='collect' && amt<=0){ showErr('tErr0','כתוב כמה לגבות — או בחר ״ללא תשלום״.'); return; }
+  var st=taskStop({text:text, name:g('tName'), phone:g('tPhone'), cust:g('tCust'), street:g('tStreet'), house:g('tHouse'), ent:g('tEnt'), apt:g('tApt'), city:city, dur:draft.dur, du:!draft.dur, pay:draft.tpay, amount:amt, am:draft.am});
   addStop(st, draft.pos, '🛠 '+st.name);
 }
 function taskDoneSheet(c){
-  draft={stop:c.id, method:c.taskAmt?null:'none'};
+  draft={stop:c.id, method:c.taskPay==='prepaid'?'prepaid':c.taskAmt?null:'none'};
   return '<h2>🛠 בוצע — '+esc(c.name)+'</h2><div class="note" style="font-weight:800">'+esc(c.task||'')+'</div>'+
     '<div class="field"><label for="tDone">מה נעשה (לא חובה)</label><textarea class="inp" id="tDone" placeholder="למשל: חובר מנגל, נבדקה דליפה — תקין"></textarea></div>'+
-    '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['none','ללא תשלום'],['cash','מזומן'],['cheque','צ׳ק'],['later','ישלם למשרד']].map(function(x){ return '<button type="button" class="chip" data-tpay="'+x[0]+'" aria-pressed="'+(draft.method===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>'+
-    '<div class="field" id="tAmtBox"'+(draft.method==='none'?' hidden':'')+'><label for="tAmt">סכום (₪)</label><input class="inp num" id="tAmt" inputmode="decimal" value="'+(c.taskAmt||'')+'"></div></div>'+
+    (c.taskPay==='prepaid'?'<div class="okbox">שולם מראש במשרד — לא גובים.</div>':'')+
+    '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['none','ללא תשלום'],['cash','מזומן'],['cheque','צ׳ק'],['later','ישלם למשרד'],['prepaid','שולם מראש במשרד']].map(function(x){ return '<button type="button" class="chip" data-tpay="'+x[0]+'" aria-pressed="'+(draft.method===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>'+
+    '<div class="field" id="tAmtBox"'+(draft.method==='none'||draft.method==='prepaid'?' hidden':'')+'><label for="tAmt">סכום (₪)</label><input class="inp num" id="tAmt" inputmode="decimal" value="'+(c.taskAmt||'')+'"></div></div>'+
     '<div class="field"><label for="tNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="tNote"></textarea></div>'+
     '<p class="err" id="tErr" hidden></p><button class="btn btn-ok" type="button" id="confirmTask">✓ בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
@@ -2388,10 +2777,10 @@ function confirmTask(){
   var c=byId(draft.stop); if(!c) return;
   if(!draft.method){ showErr('tErr','בחר תשלום (או ״ללא תשלום״).'); return; }
   var amt=parseFloat(String(document.getElementById('tAmt').value||'').replace(',','.'))||0;
-  if(draft.method!=='none' && amt<=0){ showErr('tErr','כתוב את הסכום.'); return; }
+  if(draft.method!=='none' && draft.method!=='prepaid' && amt<=0){ showErr('tErr','כתוב את הסכום.'); return; }
   var done=(document.getElementById('tDone').value||'').trim();
   c.items.forEach(function(i){ i.actual=0; }); c.status='delivered'; c.officeNote=(document.getElementById('tNote').value||'').trim();
-  c.result={at:Date.now(), payment:draft.method==='none'?{method:'none',amount:0}:{method:draft.method, amount:Math.round(amt*100)/100, owed:c.taskAmt||Math.round(amt*100)/100},
+  c.result={at:Date.now(), payment:draft.method==='none'?{method:'none',amount:0}:draft.method==='prepaid'?{method:'prepaid',amount:0}:{method:draft.method, amount:Math.round(amt*100)/100, owed:c.taskAmt||Math.round(amt*100)/100},
     empties:{1:0,2:0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), done:done};
   if(c.officeTask) taskAck(c.officeTask,'done', done||'בוצע');
   after('✓ בוצע: '+c.name);
@@ -2503,7 +2892,8 @@ document.addEventListener('click',function(ev){
   if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
   if(ds.start){ state.start=ds.start; save(); render(); return; }
   if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
-  if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); updateCountMsg(); return; }
+  if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); document.getElementById('cTruck').hidden=(ds.cpoint!=='me'); updateCountMsg(); return; }
+  if(ds.cplate){ draft.plate=ds.cplate; press('[data-cplate]',t); document.getElementById('cPlate').value=ds.cplate; updateCountMsg(); return; }
   if(ds.cmom){ draft.moment=ds.cmom; press('[data-cmom]',t); updateCountMsg(); return; }
   if(ds.ord){
     var ix=draft.seq.indexOf(ds.ord); if(ix>=0) draft.seq.splice(ix,1); else draft.seq.push(ds.ord);
@@ -2533,6 +2923,17 @@ document.addEventListener('click',function(ev){
     document.getElementById('dItemsBox').innerHTML=dItemsHtml(ac); refreshAmt(); return; }
   if(t.id==='skipExitCount'){ state.skipExitCount=true; save(); render(); return; }
   if(ds.nothome){ draft.notHome=!draft.notHome; t.setAttribute('aria-pressed', draft.notHome?'true':'false'); return; }
+  if(ds.pfor){ var pi=draft.pf.indexOf(ds.pfor); if(pi>=0) draft.pf.splice(pi,1); else draft.pf.push(ds.pfor); t.setAttribute('aria-pressed', pi<0?'true':'false'); return; }
+  if(ds.wantdn){ draft.wantDn=!draft.wantDn; t.setAttribute('aria-pressed', draft.wantDn?'true':'false'); return; }
+  if(ds.dnmode){ draft.dnNoSig=ds.dnmode==='nohome'; press('[data-dnmode]',t); document.getElementById('sigBox').hidden=draft.dnNoSig; if(!draft.dnNoSig && !(sig && sig.drawn)) initSig(); return; }
+  if(t.id==='sigClear'){ if(sig){ sig.g.clearRect(0,0,sig.cv.width,sig.cv.height); sig.drawn=false; } return; }
+  if(t.id==='issueDn'){ issueDn(); return; }
+  if(ds.fsrc){ draft.src=ds.fsrc; press('[data-fsrc]',t); document.getElementById('fCostBox').hidden=(ds.fsrc!=='תחנת דלק'); return; }
+  if(ds.fwhat){ draft.what=ds.fwhat; press('[data-fwhat]',t); return; }
+  if(ds.fdrive){ draft.drive=ds.fdrive; press('[data-fdrive]',t); return; }
+  if(t.id==='confirmFuel'){ confirmFuel(); return; }
+  if(t.id==='confirmFault'){ confirmFault(); return; }
+  if(t.id==='dnShare' || t.id==='dnSave'){ dnShare(ds.dn, t.id==='dnSave'); return; }
   if(ds.geomode){ draft.geoMode=ds.geomode; press('[data-geomode]',t); document.getElementById('geoAdd').hidden=(ds.geomode!=='add'); return; }
   if(ds.splitgo){ applySplit(); return; }
   if(ds.unsplit){ unsplit(ds.unsplit); return; }
@@ -2546,12 +2947,13 @@ document.addEventListener('click',function(ev){
   if(t.id==='dropMoved'){ state.lastMoved=null; save(); render(); return; }
   if(ds.tdur){ draft.dur=+ds.tdur; press('[data-tdur]',t); return; }
   if(ds.tam){ draft.am=!draft.am; t.setAttribute('aria-pressed', draft.am?'true':'false'); return; }
-  if(ds.tpay){ draft.method=ds.tpay; press('[data-tpay]',t); document.getElementById('tAmtBox').hidden=(ds.tpay==='none'); return; }
+  if(ds.tpay){ draft.method=ds.tpay; press('[data-tpay]',t); document.getElementById('tAmtBox').hidden=(ds.tpay==='none'||ds.tpay==='prepaid'); return; }
+  if(ds.tpay0){ draft.tpay=ds.tpay0; press('[data-tpay0]',t); var ta0=document.getElementById('tAmt0'); ta0.hidden=(ds.tpay0!=='collect'); if(!ta0.hidden) ta0.focus(); return; }
   if(t.id==='confirmTask'){ confirmTask(); return; }
   if(t.id==='confirmNewTask'){ confirmNewTask(); return; }
   if(t.id==='confirmMkTask'){ var mk=byId(draft.stop), mt=(document.getElementById('mkText').value||'').trim();
     if(!mt){ showErr('mkErr','כתוב מה צריך לעשות.'); return; }
-    mk.kind='task'; mk.fake=true; mk.task=mt; mk.dur=draft.dur; after('🛠 '+mk.name+' — מטלה (הזמנה פיקטיבית)'); return; }
+    mk.kind='task'; mk.fake=true; mk.task=mt; mk.dur=draft.dur||20; mk.du=!draft.dur; after('🛠 '+mk.name+' — מטלה (הזמנה פיקטיבית)'); return; }
   if(ds.untask){ var ut=byId(ds.untask); if(ut){ delete ut.kind; delete ut.fake; delete ut.task; delete ut.dur; save(); closeSheet(); render(); toast(ut.name+' — חזרה להזמנת גז'); } return; }
   if(ds.am){ var as=byId(ds.am); if(as){ var on=!isAm(as);
       if(custNo(as)){ state.memory[as.cust]=state.memory[as.cust]||{}; state.memory[as.cust].am=on; touchPlace(as.cust); if(!on) as.am=false; } else as.am=on;
@@ -2573,6 +2975,8 @@ document.addEventListener('click',function(ev){
   }
   if(ds.reopen){
     var r=state.stops.filter(function(x){ return x.id===ds.reopen; })[0];
+    /* a delivery note already issued keeps its number — the report lists it as cancelled */
+    if(r && r.dn){ r.dnVoid=(r.dnVoid||[]).concat([r.dn.no]); delete r.dn; delete photos['sig-'+r.id]; }
     if(r){ r.status='pending'; r.result=null; r.items=r.items.filter(function(i){ return i.qty>0; }); delete photos['q-'+r.id]; savePhotos();
       state.stops.splice(state.stops.indexOf(r),1); var c2=cur(); state.stops.splice(c2?state.stops.indexOf(c2):state.stops.length,0,r);
       save(); render(); window.scrollTo(0,0); toast('נפתח מחדש: '+r.name); }
@@ -2662,7 +3066,9 @@ document.addEventListener('input',function(ev){
     draft.v[t.dataset.cin]=clean ? parseInt(clean,10) : 0; t.classList.toggle('has', !!clean); updateCountMsg();
   }
   if(t.id==='cOther'){ draft.pointText=t.value.trim(); updateCountMsg(); }
+  if(t.id==='cPlate'){ draft.plate=plateOk(t.value); document.querySelectorAll('[data-cplate]').forEach(function(b){ b.setAttribute('aria-pressed', b.dataset.cplate===draft.plate?'true':'false'); }); updateCountMsg(); }
   if(t.dataset && t.dataset.price){ draft.price[t.dataset.price]=parseFloat(String(t.value).replace(',','.'))||0; refreshAmt(); }
+  if(t.id==='discPrice'){ var dv=parseFloat(String(t.value).replace(',','.')); draft.disc=(t.value.trim()==='' || isNaN(dv)) ? null : dv; refreshAmt(); }
 });
 document.addEventListener('input',function(ev){
   var t=ev.target;
@@ -2695,6 +3101,9 @@ document.addEventListener('change',function(ev){
     save(); render(); return; }
   if(t.id==='imp'){ var f=t.files && t.files[0]; t.value=''; if(f) importPdf(f); }
   if(t.id==='impAdd'){ var f2=t.files && t.files[0]; t.value=''; if(f2) importPdf(f2, true); }
+  /* the pink form of the morning facility load, photographed right after the exit count */
+  if(t.dataset && t.dataset.photo==='pinkx'){ readPhoto(t.files[0],function(u){ photos['pink-exit']=u; savePhotos(); state.pinkExit=true; save();
+    var pv=document.getElementById('pinkxPrev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="הטופס הוורוד">'; toast('הטופס הוורוד נשמר'); }); return; }
   if(t.dataset && t.dataset.photo==='offImg'){ var fo=t.files && t.files[0]; if(fo && draft){ draft.offImg=URL.createObjectURL(fo); document.getElementById('offImgPrev').innerHTML='<img class="thumb" src="'+draft.offImg+'" alt="הצילום שנבחר">'; } return; }
   if(t.dataset && t.dataset.photo){ var kind=t.dataset.photo;
     readPhoto(t.files[0],function(u){ if(!draft) return; draft[kind]=u; var pv=document.getElementById(kind+'Prev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="התמונה שנבחרה">'; }); }
