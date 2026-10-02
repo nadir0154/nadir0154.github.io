@@ -316,6 +316,8 @@ function migrate(s){
   if(s.dayNote==null) s.dayNote='';
   if(!s.handover) s.handover={cash:null, nq:null, note:''};   /* FEEDBACK #30: what was really handed to the clerk */
   if(!s.day) s.day = s.closedAt ? s.date : todayStr();   /* the work day; the journal's own date can be the day it was printed */
+  if(!s.firstAt && !s.closedAt){ var ats=(s.stops||[]).map(function(x){ return x.result && x.result.at; }).filter(Boolean);
+    if(ats.length){ s.firstAt=Math.min.apply(null, ats); s.day=dateStr(new Date(s.firstAt)); } }
   /* 30/09: loading / unloading is typed as quantities. Older entries had a count coming in and going out — the
      difference becomes the quantities (more full = loaded, fewer empties = unloaded, and so on). */
   s.facility.forEach(function(f){ if(f.mv) return; var mv={lf:{1:0,2:0}, le:{1:0,2:0}, uf:{1:0,2:0}, ue:{1:0,2:0}};
@@ -1578,7 +1580,12 @@ function viewCash(){
 }
 /* ================= end of day: report, printable form, archive =================
    Every report function reads `state` and `photos`; withDay() lends them a closed day from the archive for a moment. */
-function todayStr(){ var d=new Date(); return ("0"+d.getDate()).slice(-2)+"/"+("0"+(d.getMonth()+1)).slice(-2)+"/"+d.getFullYear(); }
+function dateStr(d){ return ("0"+d.getDate()).slice(-2)+"/"+("0"+(d.getMonth()+1)).slice(-2)+"/"+d.getFullYear(); }
+function todayStr(){ return dateStr(new Date()); }
+/* FEEDBACK #51: the work day is the day of the FIRST thing done in it — a delivery, a count, a facility stop, a task.
+   Not the day the journal was loaded or the route was ordered: the office sends tomorrow's journal in the evening and
+   the driver often orders it right away, and then the report of 01/10 came out as 30/09. */
+function touchDay(){ if(state.firstAt) return; state.firstAt=Date.now(); state.day=todayStr(); }
 function dayOf(){ return state.day||state.date; }
 function withDay(D, ph, fn){ var ks=state, kp=photos; state=D; photos=ph||{}; try{ return fn(); } finally { state=ks; photos=kp; } }
 function lastClose(){ try{ return JSON.parse(localStorage.getItem('gazgal-last-close')||'null'); }catch(e){ return null; } }
@@ -2325,6 +2332,7 @@ function startRoute(manual){
   else toast('לפי יישוב: '+cities.filter(function(ci){ return state.stops.some(function(s){ return s.city===ci; }); }).join(' ← '));
 }
 function saveCount(){
+  touchDay();
   var any=Object.keys(draft.v).some(function(k){ return draft.v[k]>0; });
   if(!any){ showErr('cErr','לא הוזן אף מספר.'); return; }
   if(draft.point==='other' && !draft.pointText){ showErr('cErr','כתוב את שם הנקודה.'); return; }
@@ -2481,7 +2489,7 @@ function confirmDeliver(){
     } else pay={method:draft.method, amount:amount};
     if(pay.method!=='unpaid' && (draft.pf.length || pfT)){ pay.for=draft.pf.slice(); if(pfT) pay.forText=pfT; }
   }
-  c.items=items; c.status='delivered';
+  touchDay(); c.items=items; c.status='delivered';
   c.result={at:Date.now(), payment:pay, empties:{1:draft.e[1]||0, 2:draft.e[2]||0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   if(disc) c.result.disc=disc;
   if(draft.loan[1] || draft.loan[2]) c.result.loan={1:draft.loan[1], 2:draft.loan[2]};
@@ -2509,6 +2517,7 @@ function safetyMsg(s){
     'נמצא: '+r.safety+(r.text?' — '+r.text:'')+'\nנא לתאם טכנאי ללקוח. — '+(state.driver||'הנהג');
 }
 function confirmSafety(){
+  touchDay();
   var c=byId(draft.stop)||cur(), txt=(document.getElementById('safTxt').value||'').trim();
   if(!draft.safety){ showErr('sErr','בחר מה נמצא.'); return; }
   if(draft.safety==='אחר' && !txt){ showErr('sErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
@@ -2524,6 +2533,7 @@ function confirmSafety(){
     '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
 }
 function confirmFail(){
+  touchDay();
   var c=byId(draft.stop)||cur(), txt=(document.getElementById('failTxt').value||'').trim();
   if(!draft.reason){ showErr('fErr','בחר סיבה.'); return; }
   if(draft.reason==='אחר' && !txt){ showErr('fErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
@@ -2774,6 +2784,7 @@ function taskDoneSheet(c){
     '<p class="err" id="tErr" hidden></p><button class="btn btn-ok" type="button" id="confirmTask">✓ בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
 function confirmTask(){
+  touchDay();
   var c=byId(draft.stop); if(!c) return;
   if(!draft.method){ showErr('tErr','בחר תשלום (או ״ללא תשלום״).'); return; }
   var amt=parseFloat(String(document.getElementById('tAmt').value||'').replace(',','.'))||0;
@@ -2840,6 +2851,7 @@ document.addEventListener('click',function(ev){
   if(ds.fwhere){ draft.where=ds.fwhere; press('[data-fwhere]',t); document.querySelectorAll('.fonly').forEach(function(e){ e.hidden=(draft.where==='רמפה'); }); if(draft.where==='רמפה'){ draft.swap=false; draft.pink=null; } return; }
   if(ds.swap){ draft.swap=ds.swap==='1'; press('[data-swap]',t); document.getElementById('facTruck').hidden=!draft.swap; return; }
   if(t.id==='saveFac'){
+    touchDay();
     var mv={}; ['lf','le','uf','ue'].forEach(function(k){ mv[k]={1:draft.fac[k+'-1']||0, 2:draft.fac[k+'-2']||0}; });
     if(!Object.keys(draft.fac).some(function(k){ return draft.fac[k]>0; })){ showErr('facErr','לא הוזן אף מספר.'); return; }
     var fid='F'+Date.now();
