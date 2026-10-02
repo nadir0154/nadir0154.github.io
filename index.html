@@ -1569,6 +1569,55 @@ function viewStock(){
   countsList()+'</main>';
 }
 function viewCash(){
+  var hist='<section class="card"><div class="sec" style="margin:0"><h3>📚 היסטוריית תקבולים</h3><span class="muted" style="font-size:13px">'+KEEP_DAYS+' יום</span></div>'+
+    '<input class="inp" id="payQ" autocomplete="off" placeholder="חיפוש: שם, מספר צרכן או מספר צ׳ק">'+
+    '<div id="payHist"><div class="loading"><div class="spin"></div>טוען…</div></div></section>';
+  if(state.phase!=='route') return '<main><div class="hero"><span class="eyebrow">קופת נהג</span><h1>קופה</h1><span class="muted">אין סבב פתוח — הקופה של היום תופיע כשתתחיל סבב.</span></div>'+hist+'</main>';
+  return viewCashToday().replace(/<\/main>$/, hist+'</main>');
+}
+/* FEEDBACK #52: every payment of the closed days (the archive in the phone) — per day, or searched by customer */
+var payRows=null;
+function payRowsOf(rec){
+  var out=[];
+  (rec.day.stops||[]).forEach(function(x){ var p=x.result && x.result.payment; if(x.status!=='delivered' || !p || p.method==='none') return;
+    out.push({date:rec.date, iso:(rec.day && (rec.day.day||rec.day.date)) || rec.date, name:x.name, cust:custNo(x), id:x.orderNo||(x.hot?'':x.id), city:x.city, m:p.method, a:p.amount||0, owed:p.owed,
+      no:p.no||'', due:p.due||'', f:payForText(p), disc:x.result.disc||null, task:x.kind==='task'}); });
+  return out;
+}
+async function fillPayHist(){
+  var box=document.getElementById('payHist'); if(!box) return;
+  try{
+    if(!payRows){ var idx=await dayIndex(), all=[];
+      for(var i=0;i<idx.length;i++){ var rec=await idbGet('days', idx[i].id); if(rec) all.push({id:idx[i].id, date:idx[i].date, rows:payRowsOf(rec)}); }
+      payRows=all; }
+    drawPayHist();
+  }catch(e){ box.innerHTML='<p class="err">לא הצלחתי לקרוא את הארכיון בטלפון הזה.</p>'; }
+}
+function payLine(x){
+  return '<tr><td>'+esc(x.name)+(x.task?' 🛠':'')+'<div class="s" style="font-size:12px;color:var(--muted)">'+(x.cust?'צרכן '+esc(x.cust)+' · ':'')+esc(x.city||'')+(x.f?' · על: '+esc(x.f):'')+(x.disc?' · הנחה: '+esc(x.disc.reason):'')+'</div></td>'+
+    '<td>'+esc(PAY[x.m]||x.m)+(x.m==='cheque' && x.no?'<div class="num" style="font-size:12px">מס׳ '+esc(x.no)+(x.due?' · '+esc(fmtD(x.due)):'')+'</div>':'')+'</td>'+
+    '<td class="v num">'+(x.m==='prepaid'?'—':money(x.a))+(x.owed!=null && Math.abs(x.a-x.owed)>0.009?'<div style="font-size:12px;color:var(--bad)">לגבייה '+money(x.owed)+'</div>':'')+'</td></tr>';
+}
+function drawPayHist(){
+  var box=document.getElementById('payHist'); if(!box || !payRows) return;
+  var q=((document.getElementById('payQ')||{}).value||'').trim().toLowerCase();
+  if(!payRows.length){ box.innerHTML='<p class="muted center" style="margin:8px 0">עוד אין ימים סגורים בטלפון. ימים שנסגרו בטלפון אחר — ״📚 דוחות קודמים״ ← ״☁ שחזר דוחות מהשרת״.</p>'; return; }
+  if(q){
+    var hits=[]; payRows.forEach(function(d){ d.rows.forEach(function(x){ if([x.name,x.cust,x.no,x.id].join(' ').toLowerCase().indexOf(q)>=0) hits.push(x); }); });
+    var sum=hits.reduce(function(t,x){ return t+(x.m==='prepaid'?0:x.a); },0);
+    box.innerHTML = hits.length ? '<p class="hint" style="margin:8px 0">'+hits.length+' תקבולים · '+money(sum)+'</p><div class="tbl"><table><thead><tr><th>לקוח</th><th>אמצעי</th><th class="v">סכום</th></tr></thead><tbody>'+
+      hits.map(function(x){ return '<tr><td colspan="3" style="font-size:12px;color:var(--muted);border-bottom:0;padding-bottom:0">'+esc(weekday(x.date))+' · '+esc(x.date)+'</td></tr>'+payLine(x); }).join('')+'</tbody></table></div>'
+      : '<p class="muted center" style="margin:8px 0">לא נמצא בימים הסגורים.</p>';
+    return;
+  }
+  box.innerHTML='<div style="display:grid;gap:8px;margin-top:8px">'+payRows.map(function(d){
+    var t={cash:0,cheque:0,nq:0,other:0}; d.rows.forEach(function(x){ if(x.m==='cash') t.cash+=x.a; else if(x.m==='cheque'){ t.cheque+=x.a; t.nq++; } else if(x.m!=='prepaid' && x.m!=='unpaid') t.other+=x.a; });
+    return '<details class="amg"><summary style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>'+esc(weekday(d.date))+' · '+esc(d.date)+'</span>'+
+      '<span class="num">'+money(t.cash+t.cheque)+' <small class="muted">(מזומן '+money(t.cash)+' · צ׳קים '+money(t.cheque)+(t.nq?' ב־'+t.nq:'')+')</small></span></summary>'+
+      (d.rows.length ? '<div class="tbl"><table><thead><tr><th>לקוח</th><th>אמצעי</th><th class="v">סכום</th></tr></thead><tbody>'+d.rows.map(payLine).join('')+'</tbody></table></div>'+
+        (t.other?'<p class="hint">אשראי דרך המשרד / ישלמו למשרד: '+money(t.other)+'</p>':'') : '<p class="hint">לא נגבה כסף ביום הזה.</p>')+'</details>'; }).join('')+'</div>';
+}
+function viewCashToday(){
   var t=cashTotals(), rows=done().filter(function(s){ return s.result && s.result.payment && s.result.payment.method!=='none'; });
   return '<main><div class="hero"><span class="eyebrow">קופת נהג</span><h1 class="num">'+money(t.cash+t.cheque)+'</h1><span class="muted">מזומן וצ׳קים למסירה במשרד</span></div>'+
   '<div class="grid2"><div class="kpi"><span class="v num">'+money(t.cash)+'</span><span class="k">מזומן · '+t.nc+'</span></div><div class="kpi"><span class="v num">'+money(t.cheque)+'</span><span class="k">צ׳קים · '+t.nq+'</span></div>'+
@@ -1977,6 +2026,7 @@ function viewEnd(){
 /* ---------- closing the day into the archive (on the phone, 90 days) ---------- */
 function dayIndex(){ return idbGet('kv','dayIndex').then(function(x){ return x||[]; }); }
 async function closeDay(){
+  payRows=null;
   var mem=state.memory, start=state.start;
   if(state.source==='pdf'){
     var R=report(), id=isoOf(dayOf())+'-'+state.journal;
@@ -2016,6 +2066,7 @@ function fillHistory(){
   }).catch(function(){ box.innerHTML='<p class="err">לא הצלחתי לקרוא את הארכיון בטלפון הזה.</p>'; });
 }
 async function restoreArchive(){
+  payRows=null;
   var btn=document.getElementById('restoreArchive'); if(btn){ btn.disabled=true; btn.textContent='מוריד…'; }
   try{
     var j=await (await botFetch('/api/reports')).json(), idx=await dayIndex(), have={}, n=0; idx.forEach(function(x){ have[x.id]=1; });
@@ -2028,17 +2079,18 @@ async function restoreArchive(){
   }catch(e){ toast('אין חיבור לשרת — נסה שוב'); if(btn){ btn.disabled=false; btn.textContent='☁ שחזר דוחות מהשרת (טלפון חדש)'; } }
 }
 function navbar(){
-  var v = state.view==='stock' ? 'stock' : (state.view==='doc'||state.view==='history') ? 'end' : (state.phase==='morning' ? 'route' : state.view);
+  var v = state.view==='stock' ? 'stock' : state.view==='cash' ? 'cash' : (state.view==='doc'||state.view==='history') ? 'end' : (state.phase==='morning' ? 'route' : state.view);
   function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
   return (state.phase==='route' && v==='route' && cur() ? '<button class="fab" type="button" data-sheet="hot">+ הזמנה חמה</button>' : '')+
   '<nav class="nav" aria-label="ניווט"><div class="in">'+tab('route','🚚','סבב')+tab('stock','📦','מלאי')+tab('cash','💵','קופה')+tab('end','📋','סוף יום')+'</div></nav>';
 }
 function render(){
   var v=state.view;
-  var body = v==='stock' ? viewStock() : v==='history' ? viewHistory() : v==='doc' ? viewDoc() : state.phase==='morning' ? viewMorning() : v==='cash' ? viewCash() : v==='end' ? viewEnd() : viewRoute();
+  var body = v==='stock' ? viewStock() : v==='history' ? viewHistory() : v==='doc' ? viewDoc() : v==='cash' ? viewCash() : state.phase==='morning' ? viewMorning() : v==='end' ? viewEnd() : viewRoute();
   document.getElementById('app').innerHTML = topbar()+body+navbar();
   if(v==='doc') layoutDoc();
   if(v==='history') fillHistory();
+  if(v==='cash') fillPayHist();
 }
 
 /* ================= sheets ================= */
@@ -2841,7 +2893,7 @@ document.addEventListener('click',function(ev){
   /* FEEDBACK #41: tapping Waze / "בדרך אליך" = leaving for that stop. The link still opens as usual. */
   if(ds.go){ var gs=byId(ds.go); if(gs && gs.status==='pending'){ gs.leftAt=Date.now(); save(); sendLive(); } }
   if(ds.view){
-    if(state.phase==='morning' && ['route','stock','history','doc'].indexOf(ds.view)<0){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
+    if(state.phase==='morning' && ['route','stock','history','doc','cash'].indexOf(ds.view)<0){ toast('קודם מסדרים את המסלול ומתחילים סבב'); return; }
     if(ds.view==='doc' || ds.view==='end') docRec=null;
     closeSheet(); state.view=ds.view; save(); render(); window.scrollTo(0,0); return; }
   if(ds.openday){
@@ -3085,6 +3137,7 @@ document.addEventListener('input',function(ev){
 document.addEventListener('input',function(ev){
   var t=ev.target;
   if(t.id==='dayNote'){ state.dayNote=t.value; save(); }
+  if(t.id==='payQ'){ drawPayHist(); }
   if(t.id==='cashAmt'){ t.dataset.touched='1'; }
   if(t.id==='hoCash' || t.id==='hoNq' || t.id==='hoNote'){
     if(t.id==='hoNote') state.handover.note=t.value;
