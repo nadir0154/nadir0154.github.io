@@ -263,6 +263,64 @@ var PRICES=[['ביקור טכנאי',250],['ביקור לבדיקת מחמם מ�
   ['הזזת נקודה + חיבור כיריים',400],['הזזת מיכלים / נקודה',350],['הזזת ברז גז לא נגיש',350],['הגבהת מערכת',350],['מכסה לעמדת מיכלים',350],['מטר צינור 3/8" נוסף',50],
   ['התקנה ללא מיכלים (3 מ׳ + ברז + וסת)',600],['התקנה 2×12 קומפלט',1050],['התקנה 2×48 קומפלט',2090],['התקנת חגז תקני (כולל חגז)',600],['התקנת מונה חדש',900],['התקנת מונה חוזר',700]];
 
+/* ================= טופסי ד׳ — the periodic inspection forms, as printed (ת״י 158, מהדורה 12-2020) =================
+   ד׳-4 א׳: a private installation with its own portable cylinders (בלונים, "לק"). ד׳-3: a private installation supplied
+   from a shared tank (גז מרכזי, "צר"). Every item is answered כ / ל / ל.י; an item answered "ל" is a defect at the level
+   printed next to it on the form. One unified level per item: X — fix within 21 days (ד׳-3 prints it ∅) · O — disconnect
+   the gas supply at once (ד׳-3: *) · # — disconnect the appliance / line. The summary is computed, not chosen. */
+var SEV={X:{sym:'X', d3:'∅', t:'ליקוי שאינו מחייב ניתוק — תיקון תוך 21 יום ממועד הבדיקה'}, O:{sym:'O', d3:'*', t:'ליקוי חמור — ניתוק מיידי של אספקת הגז עד לתיקון וביקורת חוזרת ע״י מתקין גז בעל רישיון'},
+  '#':{sym:'#', t:'ליקוי במכשיר / בקו — ניתוק מיידי של מכשיר הגז או קו הגז עד לתיקון וביקורת חוזרת'}};
+var HOSE='הוחלף צינור אלסטומרי לחיבור מכשיר בצינור תקני, למעט צינור גמיש מפלדה לא מחלידה וצינור אלסטומרי שקוטרו הפנימי גדול מ־8 מ״מ עם קצוות מתוגברים שיוחלפו רק לפי הצורך בעקבות הבחינה החזותית. קצות הזרנוק המחוברים לניפלים מחוזקים בחבקים.';
+var FORMS={
+  'ד׳-4':{title:'טופס ד׳-4 א׳ — דו״ח בדיקה תקופתית של מתקן גפ״מ עם מאגר נפרד של הלקוח במכלים מטלטלים', sections:[
+    {h:'1. בחינה חזותית של מאגר גפ״מ במכלים מטלטלים', items:[
+      ['1.1.1','מיקום המיכלים: במקום פתוח ומאוורר. לא במפלס נמוך, לא במקום המשמש למגורים.','X'],
+      ['1.1.2','מרחקים: 0.7 מ׳ ממקור חום וניצוצות · 1.7 מ׳ מאש גלויה · 0.5 מ׳ מבורות ותאי בקרה הסגורים במכסה קבוע · 3 מ׳ מבורות ומפתחי ניקוז פתוחים · 1.2 מ׳ מפתחי בניין (לא חל אם סף הפתח גבוה ב־0.5 מ׳ ויותר מאביזרי המיכלים) · 3 מ׳ מפתחים במפלס נמוך.','X'],
+      ['1.2','יש שילוט אזהרה עם הכיתוב ״סכנה! גז מתלקח! אסור לעשן״ וסמל הדליקות, הכולל את שם ספק הגז ומספר טלפון לחירום.','X'],
+      ['1.3','הווסת והסעפת מקובעים.','X']]},
+    {h:'2. מערכת הצנרת', items:[
+      ['2.1','מיקום הברזים נמצא תמיד ברום נמוך מזה של כל חיבור חשמלי הנמצא בטווח של 50 ס״מ ממנו.','X'],
+      ['2.3','יש ברז ניתוק בר תפעול בקרבת כל מכשיר צורך גפ״מ.','X'],
+      ['2.4','הצנרת ומרכיביה מחוזקים.','X'],
+      ['2.5','כל מוצא של מתקן שאינו מחובר באופן קבוע למכשיר — סגור בפקק או באביזר ניתוק מהיר או בשסתום חד־כיווני, ונמנע שחרור גפ״מ לאוויר.','X']]},
+    {h:'3. חיבור המכשירים', devices:'free', items:[
+      ['3.1','בדוק חזותית שלוחת המכשירים.','#'],
+      ['3.2','מכשירים קבועים מחוברים לצינור קשיח.','#'],
+      ['3.3',HOSE,'X'],
+      ['3.4','אורך הצינורות האלסטומריים אינו גדול מ־3 מ׳, למעט זרנוק ממין שכיניו 20 בהתקנות תעשייתיות וחקלאיות.','X'],
+      ['3.5.1','תקינות ארובות: הארובה שלמה ומחוזקת באופן המונע אפשרות לשינוי במצב ההתקנה.','X'],
+      ['3.5.2','מוצא ארובה אטמוספרית מרוחק 0.5 מ׳ מכל פתח בניין.','X'],
+      ['3.5.3','מוצא ארובה כפולה מרוחק 0.4 מ׳ מכל פתח בניין.','X']]}],
+    tight:{n:'4.1', sev:'O'}, reg:{n:'4.2', sev:'O'}},
+  'ד׳-3':{title:'טופס ד׳-3 — דו״ח בדיקה תקופתית של מתקן גפ״מ פרטי עם הספקה ממאגר משותף', d3:true, sections:[
+    {h:'1. קווי צינורות', items:[
+      ['1.1','קיים ברז ניתוק נגיש ליחידת הצריכה (דירה או בית עסק).','X'],
+      ['1.2','המונה מקובע.','X'],
+      ['1.3','פרק הזמן ממועד ייצור המונה אינו גדול מ־18 שנה, או במגורים — סך הנפח המצטבר אינו גדול מ־2000 מ״ק.','X'],
+      ['1.4','בשסתומי פריקה המורכבים בווסת או לאחריו והנמצאים בתוך הבניין — מוצא שסתום הפריקה מחובר אל אוויר החוץ וקצה הצינור מרוחק 1 מ׳ מכל פתח בבניין שמתחתיו.','X'],
+      ['1.5','בווסתים ללא שסתומי פריקה יש אמצעים המגבילים את הלחץ לצרכן, ואם הם מותקנים בתוך מבנה — יש אמצעים המגבילים את פתח האוורור.','O'],
+      ['1.6','קיימים ברזי ניתוק בראשית כל שלוחה מקו ראשי.','X'],
+      ['1.7','מיקום הברזים נמצא תמיד ברום נמוך מזה של כל חיבור חשמלי הנמצא בטווח 50 ס״מ ממנו.','X'],
+      ['1.8','יש ברז ניתוק בר תפעול בקרבת כל מכשיר צורך גפ״מ.','X'],
+      ['1.9','הצנרת ומרכיביה מקובעים.','X'],
+      ['1.10','כל מוצא של מתקן שאינו מחובר באופן קבוע למכשיר — סגור בפקק או באביזר ניתוק מהיר או בשסתום חד־כיווני, ונמנע שחרור גפ״מ לאוויר.','X']]},
+    {h:'2. חיבור מכשירים', devices:'d3', items:[
+      ['2.2','מכשירים קבועים מחוברים לצינור קשיח.','X'],
+      ['2.3',HOSE,'X'],
+      ['2.4','אורך הצינור האלסטומרי אינו גדול מ־3 מ׳, למעט זרנוק ממין שכיניו 20 בהתקנות תעשייתיות וחקלאיות.','X'],
+      ['2.5.1','למכשיר צורך גפ״מ עם ארובה אטמוספרית, המותקן בתוך דירת מגורים, יש תווית אישור בדיקה שנתית תקפה לפי טופס ד־5.','X'],
+      ['2.5.2','מכשיר חימום מים להסקה עם ארובה אטמוספרית אינו מותקן בתוך דירת מגורים, חדרי שינה, שירותים או רחצה.','X'],
+      ['2.5.3','מכשיר צורך גפ״מ ללא ארובה אינו מותקן באמבטיה, בשירותים או בחדר השינה, למעט מכשירי בישול ואפייה ובתנאי שמתקיימים תנאי אוורור לפי ת״י 158 חלק 3 טבלה 2.','X'],
+      ['2.6.1','תקינות ארובות: הארובה שלמה ומחוזקת באופן המונע אפשרות לשינוי ממצב ההתקנה.','X'],
+      ['2.6.2','מוצא ארובה אטמוספרית מרוחק 0.5 מ׳ מכל פתח בניין.','X'],
+      ['2.6.3','מוצא ארובה כפולה מרוחק 0.4 מ׳ מכל פתח בניין.','X'],
+      ['2.7.1','שימוש ציבורי / מסחרי / חקלאי / תעשייתי: מכשירים לחימום חלל במקומות ציבוריים מצוידים בהתקן לסגירת זרימת הגז כשהלהבה כבה.','X'],
+      ['2.7.2','במטבחים של מבני ציבור יש פתח אוורור קבוע אל אוויר החוץ או אוורור מאולץ שקיל.','X'],
+      ['2.8','למכשירים המותקנים במקום נמוך יש תווית אישור בדיקה שנתית תקפה לפי טופס ד־6.','X']]}],
+    tight:{n:'3', sev:'O'}, reg:{n:'4', sev:'O'}}
+};
+var DECLARE='אני הח״מ מצהיר ומאשר בזאת שבוצעה בדיקה של מתקן הגז המפורט לעיל, קיבלתי את מלוא ההסברים והאזהרות ואני מתחייב לפעול לפיהן. כמו כן נמסר לי עותק של הבדיקה. הובהר לי כי בדיקה זו לא כללה בדיקת תקינות של המכשירים הצורכים גז המותקנים בדירה, והומלץ לי לבודקם ע״י נציג היצרן / ספק המכשיר.';
+function me(){ return lsGet('gazgal-tech-me',{}); }
 var state, draft=null, photos={};
 function fresh(){ return {source:'none', journal:'', date:'', tech:'', techNo:'', jobs:[], phase:'morning', view:'route', memory:(state&&state.memory)||{}}; }
 function load(){ try{ var s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s && s.jobs) return s; }catch(e){} return fresh(); }
@@ -447,7 +505,9 @@ async function loadOfficeJournal(id){
 function livePayload(pos){
   var E=etas(), svc=jobMin();
   var row=function(j,s){ var r=j.result||{}; return {o:j.id, n:j.name, c:custNo(j), a:addr(j), t:j.city, w:[j.from,j.to], s:s, at:r.at||0, why:r.reason||r.why||'', k:(j.lines.map(function(l){ return CODES[l.code]||''; }).filter(Boolean)[0]||''),
-    eta: E[j.id] ? E[j.id].eta : null, late: E[j.id] ? E[j.id].late : false, nt:(r.note||'').slice(0,200)||undefined, re:j.status==='reassign'||undefined}; };
+    eta: E[j.id] ? E[j.id].eta : null, late: E[j.id] ? E[j.id].late : false,
+    nt:[r.note||'', j.form && j.fd && j.fd.done && formResult(j)!=='ok' ? '📋 '+j.form+': '+resultText(formResult(j),j.form) : ''].filter(Boolean).join(' · ').slice(0,240)||undefined,
+    fr: j.form && j.fd && j.fd.done ? formResult(j) : undefined, re:j.status==='reassign'||undefined}; };
   return {kind:'tech', day:dayOf(), phase:state.phase, driver:state.tech, journals:[state.journal], svc:svc, lastAt:done().reduce(function(m,j){ return Math.max(m,(j.result||{}).at||0); },0),
     stops: done().slice().sort(function(a,b){ return ((a.result||{}).at||0)-((b.result||{}).at||0); }).map(function(j){ return row(j, j.status==='done'?'done':'failed'); })
       .concat(pending().map(function(j){ return row(j,'next'); })), pos:pos||null};
@@ -460,9 +520,10 @@ async function sendLive(closed){ if(bot.status!=='active') return; var pos=null;
 function reportText(){
   var L=['יומן טכנאי '+state.journal+' · '+dayOf()+' · '+(state.tech||''), ''], t={cash:0,cheque:0,nq:0,later:0,office:0};
   state.jobs.forEach(function(j){ var r=j.result||{}, p=r.pay||{};
+    var fr = j.form && j.fd && j.fd.done ? ' · 📋 '+j.form+': '+resultText(formResult(j),j.form)+(j.fd.mode==='paper'?' (טופס ידני מצולם)':'') : '';
     L.push((j.status==='done'?'✓ ':j.status==='postponed'?'⏸ ':j.status==='reassign'?'↩ ':'• ')+j.id+' '+j.name+(custNo(j)?' ('+custNo(j)+')':'')+' — '+
       (j.status==='done' ? 'בוצע'+(r.exec&&r.exec.length?': '+r.exec.map(function(x){ return x.text+(x.price?' '+money(x.price):''); }).join(', '):'')+(r.note?' · '+r.note:'')+
-        (p.method && p.method!=='none' ? ' · '+PAY[p.method]+(p.amount?' '+money(p.amount):'')+(p.no?' מס׳ '+p.no:'') : '')+(r.changed?' · שונה ממחיר המשרד ('+money(j.officePrice)+'): '+r.why:'')+(r.follow?' · ⚠ צריך הזמנת המשך: '+r.follow:'')
+        (p.method && p.method!=='none' ? ' · '+PAY[p.method]+(p.amount?' '+money(p.amount):'')+(p.no?' מס׳ '+p.no:'') : '')+(r.changed?' · שונה ממחיר המשרד ('+money(j.officePrice)+'): '+r.why:'')+(r.follow?' · ⚠ צריך הזמנת המשך: '+r.follow:'')+fr
       : j.status==='postponed' ? 'נדחה — '+r.reason+(r.newDate?' · מועד חדש '+r.newDate:' · המשרד יתאם')+(r.note?' · '+r.note:'')
       : j.status==='reassign' ? 'לשיבוץ מחדש — '+r.reason+(r.level?' · נדרשת רמה '+r.level:'')
       : 'לא טופל'));
@@ -528,7 +589,7 @@ function viewRoute(){
       '<div class="cols"><h4>מה המשרד כתב (תקלה)</h4>'+linesHtml(c)+'</div>'+
       (c.officePrice?'<div class="collect c-collect"><span>המשרד אמר ללקוח</span><span class="big num">'+money(c.officePrice)+'</span></div>':'<div class="collect c-verify"><span>אין מחיר מהמשרד<small>המחיר נקבע בשטח</small></span></div>')+
       (c.needs.length?'<div class="note">🧰 לקחת: '+esc(c.needs.join(' · '))+'</div>':'')+
-      (c.form?'<div class="okbox">📋 טופס '+esc(c.form)+' — בדיקה תקופתית'+(c.type==='צר'?' (גז מרכזי)':' (בלונים)')+'</div>':'')+
+      (c.form?'<button class="btn btn-ghost btn-sm" type="button" data-form="'+esc(c.id)+'" style="border-color:var(--ok)">📋 טופס '+esc(c.form)+' — '+(c.fd && c.fd.done ? '✓ '+esc(resultText(formResult(c),c.form)) : c.fd ? 'בתהליך — להמשיך' : 'למלא')+'</button>':'')+
       '<div class="acts"><a class="act waze" data-go="'+esc(c.id)+'" href="https://waze.com/ul?q='+encodeURIComponent((c.street+' '+(c.house||'')+', '+c.city).trim())+'&navigate=yes" target="_blank" rel="noopener"><b>🧭</b>Waze</a>'+
         '<button class="act" type="button" data-sheet="call" data-preset="'+esc(c.id)+'"><b>📞</b>חיוג ('+cts.length+')</button>'+
         (mob?'<a class="act" data-go="'+esc(c.id)+'" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+((state.tech||'הטכנאי').split(' ')[0])+', הטכנאי מגז גל. אני בדרך אליכם, אגיע בעוד כ־20 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+'</div>'+
@@ -559,11 +620,140 @@ function viewEnd(){
     '<a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(R.text)+'" target="_blank" rel="noopener">💬 הסיכום בוואטסאפ למשרד</a>'+
     '<button class="btn btn-ok" type="button" id="closeDay">🔒 סגור יום ושלח למשרד</button></section>'+histCard()+'</main>';
 }
-function navbar(){ var v=state.phase==='morning'?'route':state.view;
+/* ---------- the form screen: digital (item by item + signature) or a photo of the paper form with its key fields ---------- */
+function formOf(j){ if(!j.fd){ var F=FORMS[j.form]; j.fd={kind:j.form, mode:'digital', items:{}, head:{}, devices:{}, done:false}; } return j.fd; }
+function formDefects(j){ var F=FORMS[j.form], fd=formOf(j), out=[];
+  F.sections.forEach(function(sec){ sec.items.forEach(function(it){ if(fd.items[it[0]]==='n') out.push({n:it[0], t:it[1], sev:it[2]}); }); });
+  if(fd.held==='no') out.push({n:F.tight.n, t:'בדיקת אטימות — הלחץ לא נשמר'+(fd.leakAt?' · מקום הדליפה: '+fd.leakAt:''), sev:F.tight.sev});
+  if(fd.reg==='bad') out.push({n:F.reg.n, t:'בדיקת וסת הלחץ — לא מתאים', sev:F.reg.sev});
+  return out; }
+function formResult(j){ var fd=formOf(j);
+  if(fd.mode==='paper') return fd.result||''; var d=formDefects(j);
+  return d.some(function(x){ return x.sev==='O'; }) ? 'O' : d.some(function(x){ return x.sev==='#'; }) ? '#' : d.length ? 'X' : 'ok'; }
+function resultText(res,kind){ return res==='ok' ? 'המתקן נמצא תקין' : res ? 'ליקוי '+(kind==='ד׳-3' && SEV[res].d3 ? SEV[res].d3 : res)+' — '+SEV[res].t : 'לא סומן'; }
+function formMissing(j){ var F=FORMS[j.form], fd=formOf(j), miss=[];
+  if(fd.mode==='paper'){ if(!photos['f-'+j.id]) miss.push('צילום הטופס'); if(!fd.result) miss.push('תוצאת הבדיקה'); if(!fd.date) miss.push('תאריך'); return miss; }
+  F.sections.forEach(function(sec){ sec.items.forEach(function(it){ if(!fd.items[it[0]]) miss.push(it[0]); }); });
+  if(!fd.pressure) miss.push('לחץ המדידה'); if(!fd.held) miss.push('האם הלחץ נשמר'); if(!fd.reg) miss.push('וסת הלחץ');
+  if(!me().lic) miss.push('מספר רישיון הגז שלך'); if(!fd.signed && !fd.noSign) miss.push('חתימת הלקוח');
+  return miss; }
+function tri(n,v){ return '<div class="chips" role="group" aria-label="סעיף '+n+'">'+[['y','כ'],['n','ל'],['na','ל.י']].map(function(o){ return '<button type="button" class="chip" style="min-height:40px;padding:0 12px" data-fi="'+n+'" data-v="'+o[0]+'" aria-pressed="'+(v===o[0])+'">'+o[1]+'</button>'; }).join('')+'</div>'; }
+function sevBadge(sev,kind){ return '<span class="tag '+(sev==='X'?'t-warn':'t-bad')+'" title="'+esc(SEV[sev].t)+'">'+esc(kind==='ד׳-3' && SEV[sev].d3 ? SEV[sev].d3 : sev)+'</span>'; }
+function inpF(k,label,val,num){ return '<div class="field"><label class="lbl">'+label+'</label><input class="inp'+(num?' num':'')+'" data-fh="'+k+'" value="'+esc(val==null?'':val)+'"'+(num?' inputmode="numeric"':'')+' autocomplete="off"></div>'; }
+function viewForm(){
+  var j=byId(state.formJob); if(!j || !FORMS[j.form]){ state.view='route'; return viewRoute(); }
+  var F=FORMS[j.form], fd=formOf(j), h=fd.head, res=formResult(j), D=formDefects(j), M=me(), d3=!!F.d3;
+  var head = d3
+    ? '<div class="grid2">'+inpF('meter','מס׳ מונה',h.meter!=null?h.meter:j.meter,1)+inpF('central','מס׳ מרכזייה',h.central!=null?h.central:j.central,1)+inpF('reading','קריאת מונה',h.reading,1)+inpF('meterYear','שנת ייצור המונה',h.meterYear,1)+
+        inpF('opYear','שנת הפעלת המתקן',h.opYear,1)+inpF('prev','בדיקה תקופתית קודמת (תאריך)',h.prev)+inpF('tank','מאגר: צובר',h.tank)+inpF('c48','מאגר: X48',h.c48,1)+'</div>'
+    : '<div class="grid2">'+inpF('id','ת.ז הלקוח (לא חובה)',h.id,1)+inpF('prev','בדיקה תקופתית קודמת (תאריך)',h.prev)+inpF('c12','כמות מיכלים 12 ×',h.c12,1)+inpF('c48','כמות מיכלים 48 ×',h.c48,1)+'</div>'+
+      inpF('points','לפי הצהרת הלקוח: נקודות גז — כמה וממוקמות ב…',h.points);
+  var kind='<div class="field"><span class="lbl">סוג המתקן</span><div class="chips">'+['פרטי','מסחרי','אחר'].map(function(k){ return '<button type="button" class="chip" data-fk="'+k+'" aria-pressed="'+(h.kind===k)+'">'+k+'</button>'; }).join('')+'</div></div>';
+  var devs = function(sec){ if(sec.devices==='free') return '<div class="field"><span class="lbl">פרט את המכשירים צורכי הגפ״מ המחוברים למתקן בזמן הבדיקה</span>'+[1,2,3].map(function(i){ return '<input class="inp" data-fdev="'+i+'" value="'+esc(fd.devices[i]||'')+'" placeholder="'+i+'." autocomplete="off">'; }).join('')+'</div>';
+    var dv=fd.devices, ch=function(k,v,l){ return '<button type="button" class="chip" style="min-height:38px;padding:0 10px" data-fdc="'+k+'" data-v="'+v+'" aria-pressed="'+(dv[k]===v)+'">'+(l||v)+'</button>'; };
+    return '<div class="card" style="box-shadow:none;border:1.5px solid var(--line);gap:8px"><b>2.1 פרט את המכשירים צורכי הגפ״מ המחוברים למתקן בזמן הבדיקה</b>'+
+      '<span class="lbl">כיריים</span><div class="chips">'+ch('stove','משולב','כיריים משולב')+ch('stove','גומחה')+ch('stove','שולחני')+'</div>'+
+      '<div class="grid2"><input class="inp" data-fdev="stoveMaker" value="'+esc(dv.stoveMaker||'')+'" placeholder="מתוצרת"><input class="inp" data-fdev="stoveColor" value="'+esc(dv.stoveColor||'')+'" placeholder="צבע">'+
+      '<input class="inp num" data-fdev="burners" value="'+esc(dv.burners||'')+'" placeholder="מס׳ מבערים" inputmode="numeric"><input class="inp num" data-fdev="stoveYear" value="'+esc(dv.stoveYear||'')+'" placeholder="שנת ייצור" inputmode="numeric"></div>'+
+      '<span class="lbl">מחמם חדר</span><div class="grid2"><input class="inp" data-fdev="heaterMaker" value="'+esc(dv.heaterMaker||'')+'" placeholder="מתוצרת"><input class="inp" data-fdev="heaterColor" value="'+esc(dv.heaterColor||'')+'" placeholder="צבע"></div>'+
+      '<span class="lbl">מחמם מים — סוג</span><div class="chips">'+ch('whType','מי צריכה')+ch('whType','הסקה')+ch('whType','דו־תכליתי')+'</div>'+
+      '<span class="lbl">עקרון פעולה</span><div class="chips">'+ch('whOp','ארובה כפולה')+ch('whOp','אטמוספרי')+ch('whOp','מס״ד')+'</div>'+
+      '<span class="lbl">מיקום</span><div class="chips">'+['חדר','מסתור כביסה','מרפסת מקורה','מרפסת לא מקורה','מטבח','חדר אמבטיה','קיר חיצוני','אחר'].map(function(v){ return ch('whLoc',v); }).join('')+'</div>'+
+      '<div class="grid2"><input class="inp" data-fdev="more" value="'+esc(dv.more||'')+'" placeholder="מכשירים נוספים"><input class="inp" data-fdev="moreSer" value="'+esc(dv.moreSer||'')+'" placeholder="מסד"></div>'+
+      '<div class="chips">'+ch('none','1','☐ לא מחובר מכשיר צורך גפ״מ — פוקקו ברזי הקצה')+'</div></div>'; };
+  var out='<main><div class="hero"><span class="eyebrow">'+esc(j.name)+' · הזמנה '+esc(j.id)+'</span><h1 style="font-size:24px">📋 '+esc(F.title)+'</h1></div>'+
+    '<div class="chips" role="group" aria-label="איך ממלאים"><button type="button" class="chip" data-fmode="digital" aria-pressed="'+(fd.mode==='digital')+'">✍️ טופס דיגיטלי</button><button type="button" class="chip" data-fmode="paper" aria-pressed="'+(fd.mode==='paper')+'">📷 טופס ידני — צילום</button></div>';
+  if(fd.mode==='paper'){
+    var ph=photos['f-'+j.id];
+    out+='<section class="card"><p class="hint">ממלאים את הטופס בפנקס, מצלמים, ומזינים את שדות המפתח — כדי שהבדיקה תהיה ניתנת לחיפוש ותפעיל חסימות.</p>'+
+      photoPick('fpaper','צלם את הטופס')+(ph?'<img src="'+ph+'" alt="הטופס הידני" style="max-height:220px;border-radius:10px">':'')+
+      '<div class="field"><span class="lbl">תוצאת הבדיקה</span><div class="chips">'+['ok','X','O','#'].filter(function(k){ return !(d3 && k==='#'); }).map(function(k){ return '<button type="button" class="chip" data-fres="'+k+'" aria-pressed="'+(fd.result===k)+'">'+(k==='ok'?'תקין':'ליקוי '+(d3&&SEV[k].d3?SEV[k].d3:k))+'</button>'; }).join('')+'</div>'+
+        (fd.result && fd.result!=='ok'?'<p class="hint">'+esc(SEV[fd.result].t)+'</p>':'')+'</div>'+
+      '<div class="field"><label class="lbl">מכשירים</label><input class="inp" data-fp="devices" value="'+esc(fd.devicesText||'')+'" placeholder="למשל: כיריים משולב, מחמם מים"></div>'+
+      '<div class="field"><label class="lbl">תאריך הבדיקה</label><input class="inp" type="date" data-fp="date" value="'+esc(fd.date||'')+'"></div>'+
+      '<div class="field"><label class="lbl">הערות</label><textarea class="inp" data-fp="notes">'+esc(fd.notes||'')+'</textarea></div></section>';
+  } else {
+    out+='<section class="card"><b>פרטי הלקוח והמתקן</b><div class="muted">'+esc(j.name)+' · '+esc(addr(j)+', '+j.city)+(custNo(j)?' · צרכן '+esc(custNo(j)):'')+'</div>'+head+kind+'</section>';
+    F.sections.forEach(function(sec){
+      out+='<section class="card"><b>'+esc(sec.h)+'</b>'+(sec.devices && sec.devices!=='d3' ? devs(sec) : '')+(sec.devices==='d3' ? devs(sec) : '')+
+        sec.items.map(function(it){ var v=fd.items[it[0]]; return '<div style="display:grid;gap:6px;padding:8px 0;border-bottom:1px solid var(--line)'+(v==='n'?';background:var(--bad-bg);border-radius:8px;padding:8px':'')+'"><div><b class="num">'+esc(it[0])+'</b> '+sevBadge(it[2],j.form)+' <span style="font-size:15px">'+esc(it[1])+'</span></div>'+tri(it[0],v)+'</div>'; }).join('')+
+        '<button class="linkish" type="button" data-fall="'+esc(sec.items.map(function(it){ return it[0]; }).join(','))+'">✓ כל הסעיפים בפרק — כ (תקין)</button></section>';
+    });
+    out+='<section class="card"><b>'+esc(F.tight.n)+'. בדיקת אטימות</b> '+sevBadge(F.tight.sev,j.form)+
+      '<p class="hint">בלחץ השימוש, כולל הצינורות האלסטומריים (אחרי החלפתם), כשברזי המכשירים סגורים. מד־לחץ בטווח שאינו גדול מפי 3 מהלחץ הנמדד; מחזיקים את הלחץ 15 דקות ומוודאים שאין ירידה.</p>'+
+      '<div class="field"><label class="lbl">לחץ המדידה (מיליבר)</label><input class="inp num" data-fx="pressure" inputmode="decimal" value="'+esc(fd.pressure||'')+'"></div>'+
+      '<div class="field"><span class="lbl">האם הלחץ נשמר?</span><div class="chips"><button type="button" class="chip" data-fheld="yes" aria-pressed="'+(fd.held==='yes')+'">כן</button><button type="button" class="chip" data-fheld="no" aria-pressed="'+(fd.held==='no')+'">לא</button></div></div>'+
+      (fd.held==='no'?'<div class="field"><label class="lbl">מקום הדליפה (לאתר בנוזל לבדיקת דליפות או בגלאי גז)</label><input class="inp" data-fx="leakAt" value="'+esc(fd.leakAt||'')+'"></div>':'')+
+      '<b>'+esc(F.reg.n)+(d3?'. בדיקת וסת הלחץ':' בדיקת וסת הלחץ')+'</b> '+sevBadge(F.reg.sev,j.form)+'<p class="hint">מקור לחץ פתוח, ברזי המכשירים סגורים, מד־הלחץ בקו אחרי מוצא הווסת. חמש דקות; הלחץ אינו גדול ב־30% מהנומינלי.</p>'+
+      '<div class="chips"><button type="button" class="chip" data-freg="ok" aria-pressed="'+(fd.reg==='ok')+'">מתאים</button><button type="button" class="chip" data-freg="bad" aria-pressed="'+(fd.reg==='bad')+'">לא מתאים</button></div></section>';
+    out+='<section class="card"><b>'+(d3?'5. סיכום מבצע הבדיקה':'5. סיכום בודק')+'</b>'+
+      '<div class="'+(res==='ok'?'okbox':'note')+'" style="font-size:15px'+(res==='O'||res==='#'?';color:var(--bad)':'')+'">'+esc(resultText(res,j.form))+'</div>'+
+      (D.length?'<ul style="margin:0;padding-inline-start:18px">'+D.map(function(x){ return '<li><b>'+esc(x.n)+'</b> '+sevBadge(x.sev,j.form)+' '+esc(x.t)+'</li>'; }).join('')+'</ul>':'')+
+      '<div class="field"><label class="lbl">הערות נוספות</label><textarea class="inp" data-fx="notes">'+esc(fd.notes||'')+'</textarea></div>'+
+      '<div class="mem"><b>מבצע הבדיקה</b><span>'+esc(M.name||state.tech||'')+(M.lic?' · רישיון גז '+esc(M.lic):' · <b style="color:var(--bad)">חסר מספר רישיון</b>')+(M.level?' · רמה '+esc(M.level):'')+'</span><button class="linkish" type="button" data-sheet="me">⚙ הפרטים שלי (רישיון, רמה)</button></div></section>';
+    out+='<section class="card"><b>אישור הלקוח</b><p style="margin:0;font-size:14px">'+esc(DECLARE)+'</p>'+
+      (fd.signed && photos['fs-'+j.id] ? '<img src="'+photos['fs-'+j.id]+'" alt="חתימת הלקוח" style="background:#fff;border-radius:10px;max-height:120px"><div class="muted">'+esc(fd.signer||'')+'</div><button class="linkish" type="button" data-fsig="redo">חתימה מחדש</button>'
+        : '<div class="field"><label class="lbl">שם הלקוח החותם</label><input class="inp" data-fx="signer" value="'+esc(fd.signer!=null?fd.signer:j.name)+'"></div>'+
+          '<canvas id="sigPad" class="sigpad" aria-label="משטח חתימה"></canvas><div class="grid2"><button class="btn btn-ghost btn-sm" type="button" data-fsig="clear">נקה</button><button class="btn btn-accent btn-sm" type="button" data-fsig="save">שמור חתימה</button></div>'+
+          '<div class="chips"><button type="button" class="chip" data-fnosign="1" aria-pressed="'+(!!fd.noSign)+'">הלקוח לא בבית / סירב לחתום</button></div>')+'</section>';
+  }
+  var miss=formMissing(j);
+  out+=(miss.length?'<div class="note">חסר: '+esc(miss.slice(0,8).join(' · '))+(miss.length>8?' ועוד '+(miss.length-8):'')+'</div>':'<div class="okbox">✓ הטופס מלא</div>')+
+    '<button class="btn btn-ok" type="button" id="formDone">'+(miss.length?'שמור והמשך אחר כך':'✓ סיים טופס')+'</button>'+
+    (fd.done && fd.mode==='digital'?'<button class="btn btn-ghost btn-sm" type="button" id="formShare">📤 עותק ללקוח (PDF)</button>':'')+
+    '<button class="btn btn-ghost btn-sm" type="button" data-view="route">חזרה לעבודה</button></main>';
+  return out;
+}
+function navbar(){ var v=state.phase==='morning'?'route':state.view==='form'?'route':state.view;
   function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
   return '<nav class="nav" aria-label="ניווט"><div class="in" style="grid-template-columns:repeat(2,1fr)">'+tab('route','🔧','עבודות')+tab('end','📋','סוף יום')+'</div></nav>'; }
-function render(){ var body = state.phase==='morning' ? viewMorning() : state.view==='end' ? viewEnd() : viewRoute();
-  document.getElementById('app').innerHTML=topbar()+body+navbar(); }
+function render(){ var body = state.phase==='morning' ? viewMorning() : state.view==='end' ? viewEnd() : state.view==='form' ? viewForm() : viewRoute();
+  document.getElementById('app').innerHTML=topbar()+body+navbar();
+  if(state.view==='form' && document.getElementById('sigPad')) initSig(); }
+/* the signature pad (as in the driver's delivery note) */
+var sig=null;
+function initSig(){ var cv=document.getElementById('sigPad'); if(!cv || !cv.getBoundingClientRect().width) return;
+  var b=cv.getBoundingClientRect(), k=Math.max(1,Math.min(2,window.devicePixelRatio||1)); cv.width=Math.round(b.width*k); cv.height=Math.round(b.height*k);
+  var g=cv.getContext('2d'); g.scale(k,k); g.lineWidth=2.6; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle=g.fillStyle='#111'; sig={cv:cv, g:g, drawn:false, last:null};
+  var at=function(e){ var r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; };
+  cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} sig.last=at(e); g.beginPath(); g.arc(sig.last.x,sig.last.y,1.3,0,7); g.fill(); sig.drawn=true; });
+  cv.addEventListener('pointermove',function(e){ if(!sig.last) return; e.preventDefault(); var p=at(e); g.beginPath(); g.moveTo(sig.last.x,sig.last.y); g.lineTo(p.x,p.y); g.stroke(); sig.last=p; });
+  ['pointerup','pointercancel','pointerleave'].forEach(function(t){ cv.addEventListener(t,function(){ sig.last=null; }); }); }
+/* the customer's copy: the filled form as one page, black on white, then a PDF */
+function formPaper(j){
+  var F=FORMS[j.form], fd=formOf(j), h=fd.head, M=me(), res=formResult(j), D=formDefects(j), d3=!!F.d3, mark=function(v){ return v==='y'?'כ':v==='n'?'<b>ל</b>':v==='na'?'ל.י':''; };
+  var row=function(a,b){ return '<tr><td style="text-align:start;width:46%;font-weight:700">'+a+'</td><td style="text-align:start">'+esc(b==null?'':b)+'</td></tr>'; };
+  var dv=fd.devices||{}, devTxt = d3 ? [dv.stove?'כיריים '+dv.stove:'', dv.stoveMaker?'מתוצרת '+dv.stoveMaker:'', dv.burners?dv.burners+' מבערים':'', dv.stoveYear?'שנת ייצור '+dv.stoveYear:'', dv.heaterMaker?'מחמם חדר '+dv.heaterMaker:'', dv.whType?'מחמם מים '+dv.whType:'', dv.whOp||'', dv.whLoc?'מיקום: '+dv.whLoc:'', dv.more?'נוספים: '+dv.more+(dv.moreSer?' מסד '+dv.moreSer:''):'', dv.none?'לא מחובר מכשיר — פוקקו ברזי הקצה':''].filter(Boolean).join(' · ')
+    : [1,2,3].map(function(i){ return dv[i]; }).filter(Boolean).map(function(x,i){ return (i+1)+'. '+x; }).join('   ');
+  return '<div class="paper" style="height:auto;padding-bottom:44px;font-size:12.5px">'+
+    '<div class="hdr"><div><h1 style="font-size:17px">גז גל ואנונו בע״מ · אופקים</h1><div class="f">'+esc(j.form==='ד׳-4'?'טופס ד׳-4 א׳':'טופס ד׳-3')+' · מהדורה 12-2020 · בהתאם לת״י 158'+(d3?' חלק 4':'')+'</div></div><div class="f">תאריך: <b>'+esc(fmtDate(fd.at))+'</b><br>הזמנה: <b>'+esc(j.id)+'</b></div></div>'+
+    '<div style="font-weight:800;font-size:14px;margin-bottom:6px">'+esc(F.title.replace(/^טופס [^—]+— /,''))+'</div>'+
+    '<table class="wide" style="font-size:12px"><tbody>'+row('שם הלקוח',j.name)+row('כתובת',addr(j)+', '+j.city)+row('מספר צרכן',custNo(j))+row('טלפון',(j.phones||[])[0]||'')+
+      (d3 ? row('מס׳ מונה',h.meter!=null?h.meter:j.meter)+row('מס׳ מרכזייה',h.central!=null?h.central:j.central)+row('קריאת מונה',h.reading)+row('שנת ייצור המונה',h.meterYear)+row('שנת הפעלת המתקן',h.opYear)+row('מאגר גפ״מ במתקן','צובר '+(h.tank||'—')+' · X48 '+(h.c48||'—'))
+          : row('ת.ז',h.id)+row('כמות מיכלים במתקן','12 × '+(h.c12||'—')+' · 48 × '+(h.c48||'—'))+row('נקודות גז (לפי הצהרת הלקוח)',h.points))+
+      row('סוג המתקן',h.kind)+row('בדיקה תקופתית קודמת',h.prev)+row('מכשירים',devTxt)+'</tbody></table>'+
+    F.sections.map(function(sec){ return '<div style="font-weight:800;margin:8px 0 3px">'+esc(sec.h)+'</div><table class="wide" style="font-size:11px"><tbody>'+sec.items.map(function(it){ return '<tr'+(fd.items[it[0]]==='n'?' style="background:#f3d6d2"':'')+'><td class="c" style="width:38px">'+esc(it[0])+'</td><td class="c" style="width:22px">'+esc(d3&&SEV[it[2]].d3?SEV[it[2]].d3:it[2])+'</td><td style="text-align:start">'+esc(it[1])+'</td><td class="c" style="width:34px">'+mark(fd.items[it[0]])+'</td></tr>'; }).join('')+'</tbody></table>'; }).join('')+
+    '<div style="margin-top:8px"><b>'+esc(F.tight.n)+'. בדיקת אטימות</b> — לחץ המדידה: <b>'+esc(fd.pressure||'—')+'</b> מיליבר · הלחץ נשמר: <b>'+(fd.held==='yes'?'כן':fd.held==='no'?'לא':'—')+'</b>'+(fd.leakAt?' · מקום הדליפה: '+esc(fd.leakAt):'')+'</div>'+
+    '<div><b>'+esc(F.reg.n)+'. בדיקת וסת הלחץ</b> — <b>'+(fd.reg==='ok'?'מתאים':fd.reg==='bad'?'לא מתאים':'—')+'</b></div>'+
+    '<div style="margin-top:8px;border:2px solid #000;padding:6px 8px"><b>סיכום: '+esc(resultText(res,j.form))+'</b>'+(D.length?'<div>'+D.map(function(x){ return esc(x.n+' ('+(d3&&SEV[x.sev].d3?SEV[x.sev].d3:x.sev)+') '+x.t); }).join('<br>')+'</div>':'')+(fd.notes?'<div>הערות: '+esc(fd.notes)+'</div>':'')+'</div>'+
+    '<div style="display:flex;gap:24px;margin-top:10px"><div style="flex:1"><b>מבצע הבדיקה:</b> '+esc(M.name||state.tech||'')+'<br>מס׳ רישיון גז: '+esc(M.lic||'')+' · רמה: '+esc(M.level||'')+'</div>'+
+      '<div style="flex:1;font-size:11px"><b>אישור הלקוח:</b> '+esc(DECLARE)+'<br>שם: '+esc(fd.signer||'')+(fd.noSign?' — <b>לא נחתם (הלקוח לא בבית / סירב)</b>':'')+
+      (fd.signed && photos['fs-'+j.id]?'<br><img src="'+photos['fs-'+j.id]+'" alt="חתימה" style="height:70px">':'')+'</div></div>'+
+    '<div class="foot"><span>העתקים: מקור — לחב׳ הגז · העתק — ללקוח</span><span>הופק באפליקציית הטכנאי · '+esc(new Date().toLocaleString('he-IL'))+'</span></div></div>';
+}
+function fmtDate(t){ return t ? new Date(t).toLocaleDateString('he-IL') : new Date().toLocaleDateString('he-IL'); }
+function loadScript(src){ return new Promise(function(res,rej){ if(document.querySelector('script[src="'+src+'"]')) return res(); var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+async function formShare(j){
+  var btn=document.getElementById('formShare'); if(btn){ btn.disabled=true; btn.textContent='מכין PDF…'; }
+  try{ await loadScript('../vendor/html2canvas.min.js'); await loadScript('../vendor/jspdf.umd.min.js');
+    var box=document.createElement('div'); box.style.cssText='position:fixed;top:0;left:-10000px;width:794px'; box.innerHTML=formPaper(j); document.body.appendChild(box);
+    var cv=await window.html2canvas(box.firstChild,{scale:2, backgroundColor:'#ffffff', logging:false}), hmm=Math.round(210*cv.height/cv.width);
+    var pdf=new window.jspdf.jsPDF({unit:'mm', format:[210,hmm], orientation:hmm>=210?'portrait':'landscape', compress:true}); pdf.addImage(cv.toDataURL('image/jpeg',0.88),'JPEG',0,0,210,hmm); box.remove();
+    var name=(j.form==='ד׳-4'?'טופס-ד4':'טופס-ד3')+'-'+j.id+'.pdf', file=new File([pdf.output('blob')], name, {type:'application/pdf'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){ try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; } }
+    else { var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove(); toast('ה־PDF ירד לטלפון'); }
+  }catch(e){ toast('לא הצלחתי להכין PDF'); }
+  if(btn){ btn.disabled=false; btn.textContent='📤 עותק ללקוח (PDF)'; } }
 
 /* ================= sheets ================= */
 function openSheet(kind,preset){
@@ -572,6 +762,11 @@ function openSheet(kind,preset){
     '<div class="field"><label for="admTech">הטכנאי</label><select class="inp" id="admTech"><option value="kasem">קסם</option><option value="avraham">אברהם</option><option value="nadir">נדיר</option><option value="yoram">יורם</option></select></div>'+
     '<div class="field"><label for="admCode">קוד מנהל</label><input class="inp" id="admCode" type="password" autocomplete="off"></div>'+
     '<button class="btn btn-accent" type="button" id="doPair">חבר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  if(kind==='me'){ var M=me(); html='<h2>⚙ הפרטים שלי</h2><p class="hint">מופיעים כ״מבצע הבדיקה״ בכל טופס. נשמר בטלפון.</p>'+
+    '<div class="field"><label for="meName">שם מבצע הבדיקה</label><input class="inp" id="meName" value="'+esc(M.name||state.tech||'')+'"></div>'+
+    '<div class="field"><label for="meLic">מס׳ רישיון גז</label><input class="inp num" id="meLic" inputmode="numeric" value="'+esc(M.lic||'')+'"></div>'+
+    '<div class="field"><span class="lbl">רמה</span><div class="chips">'+['0','1','2'].map(function(l){ return '<button type="button" class="chip" data-melevel="'+l+'" aria-pressed="'+(M.level===l)+'">רמה '+l+'</button>'; }).join('')+'</div></div>'+
+    '<button class="btn btn-accent" type="button" id="meSave">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>'; draft={level:M.level||''}; }
   if(kind==='peek') html='<h2>'+esc(c.name)+'</h2><div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+'</span></div><div><span class="win">🕘 '+esc(c.from+'–'+c.to)+'</span></div>'+linesHtml(c)+
     (c.status==='pending'&&state.phase==='route'?'<button class="btn btn-accent btn-sm" type="button" data-first="'+esc(c.id)+'">⤒ עבור עכשיו</button>':'')+'<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   if(kind==='call') html='<h2>חיוג — '+esc(c.name)+'</h2><div class="list">'+contactsList(c).map(function(x){ return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+
@@ -592,7 +787,7 @@ function openSheet(kind,preset){
       '<div class="field"><label for="note">הערה למשרד (לא חובה)</label><textarea class="inp" id="note" placeholder="מה שהיית כותב בתעודה"></textarea></div>'+
       '<div class="field"><span class="lbl">תמונה (לא חובה)</span>'+photoPick('ph','צלם')+'</div>'+
       '<div class="field"><div class="chips"><button type="button" class="chip" data-follow="1" aria-pressed="false">➕ צריך הזמנת המשך</button></div><input class="inp" id="follow" hidden placeholder="מה נשאר לעשות — למשל: להחליף רמפה בחוץ"></div>'+
-      (c.form?'<div class="note">📋 טופס '+esc(c.form)+': בינתיים ממלאים בפנקס ומצלמים כאן. הטופס הדיגיטלי — בשלב הבא.</div>':'')+
+      (c.form ? (c.fd && c.fd.done ? '<div class="okbox">📋 טופס '+esc(c.form)+' — '+esc(resultText(formResult(c),c.form))+'</div>' : '<div class="note">📋 טופס '+esc(c.form)+' עוד לא מולא. <button class="linkish" type="button" data-form="'+esc(c.id)+'" style="display:inline;min-height:0">למלא עכשיו</button></div>') : '')+
       '<p class="err" id="dErr" hidden></p><button class="btn btn-ok" type="button" id="confirmDone">אישור — בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
   if(kind==='postpone'){ draft={job:c.id, reason:null};
@@ -627,6 +822,7 @@ function confirmDone(){
   var changed = c.officePrice && tot>0 && Math.abs(tot-c.officePrice)>0.009;
   if(changed && !why){ showErr('dErr','המחיר שונה ממה שהמשרד אמר ('+money(c.officePrice)+') — כתוב למה.'); return; }
   if(draft.follow && !g('follow')){ showErr('dErr','כתוב מה נשאר לעשות בהזמנת ההמשך.'); return; }
+  if(c.form && !(c.fd && c.fd.done)){ showErr('dErr','צריך למלא את טופס '+c.form+' (דיגיטלי או צילום של הטופס הידני) — או לסמן ״נדחה״ אם הבדיקה לא בוצעה.'); return; }
   var pay={method:draft.method, amount:(draft.method==='none'||draft.method==='prepaid'||draft.method==='unpaid'&&!(tot>0))?0:(Math.round(tot*100)/100||0)};
   if(draft.method==='cheque'){ pay.no=g('chqNo'); pay.due=g('chqDue'); }
   if(!state.firstAt){ state.firstAt=Date.now(); state.day=todayStr(); }
@@ -657,6 +853,27 @@ document.addEventListener('click',function(ev){
   if(ds.pay){ draft.method=ds.pay; press('[data-pay]',t); document.getElementById('chq').hidden=ds.pay!=='cheque'; return; }
   if(ds.follow){ draft.follow=!draft.follow; t.setAttribute('aria-pressed', draft.follow?'true':'false'); document.getElementById('follow').hidden=!draft.follow; return; }
   if(t.id==='confirmDone'){ confirmDone(); return; }
+  /* the inspection form */
+  if(ds.form){ closeSheet(); state.formJob=ds.form; state.view='form'; save(); render(); window.scrollTo(0,0); return; }
+  var FJ = state.view==='form' ? byId(state.formJob) : null, FD = FJ ? formOf(FJ) : null;
+  if(FD && ds.fmode){ FD.mode=ds.fmode; FD.done=false; save(); render(); return; }
+  if(FD && ds.fi){ FD.items[ds.fi]=ds.v; FD.done=false; save(); render(); return; }
+  if(FD && ds.fall){ ds.fall.split(',').forEach(function(n){ FD.items[n]='y'; }); FD.done=false; save(); render(); return; }
+  if(FD && ds.fk){ FD.head.kind=ds.fk; save(); render(); return; }
+  if(FD && ds.fheld){ FD.held=ds.fheld; FD.done=false; save(); render(); return; }
+  if(FD && ds.freg){ FD.reg=ds.freg; FD.done=false; save(); render(); return; }
+  if(FD && ds.fres){ FD.result=ds.fres; save(); render(); return; }
+  if(FD && ds.fdc){ FD.devices[ds.fdc] = FD.devices[ds.fdc]===ds.v ? '' : ds.v; save(); render(); return; }
+  if(FD && ds.fnosign){ FD.noSign=!FD.noSign; if(FD.noSign){ FD.signed=false; } save(); render(); return; }
+  if(FD && ds.fsig==='clear'){ if(sig){ sig.g.clearRect(0,0,sig.cv.width,sig.cv.height); sig.drawn=false; } return; }
+  if(FD && ds.fsig==='save'){ if(!(sig && sig.drawn)){ toast('הלקוח עוד לא חתם'); return; } photos['fs-'+FJ.id]=sig.cv.toDataURL('image/png'); savePhotos(); FD.signed=true; var sn=document.querySelector('[data-fx="signer"]'); if(sn) FD.signer=sn.value.trim(); FD.noSign=false; save(); render(); toast('✓ החתימה נשמרה'); return; }
+  if(FD && ds.fsig==='redo'){ FD.signed=false; delete photos['fs-'+FJ.id]; savePhotos(); save(); render(); return; }
+  if(FD && t.id==='formDone'){ var miss=formMissing(FJ); FD.done=!miss.length; if(FD.done) FD.at=FD.at||Date.now(); save();
+    if(miss.length){ state.view='route'; save(); render(); window.scrollTo(0,0); toast('נשמר. חסר עוד: '+miss.slice(0,4).join(', ')); return; }
+    render(); toast('✓ טופס '+FJ.form+' — '+resultText(formResult(FJ),FJ.form)); return; }
+  if(FD && t.id==='formShare'){ formShare(FJ); return; }
+  if(ds.melevel!==undefined){ draft.level=ds.melevel; press('[data-melevel]',t); return; }
+  if(t.id==='meSave'){ lsSet('gazgal-tech-me',{name:(document.getElementById('meName').value||'').trim(), lic:(document.getElementById('meLic').value||'').trim(), level:draft.level}); after('✓ נשמר'); return; }
   if(ds.reason){ draft.reason=ds.reason; press('[data-reason]',t); return; }
   if(t.id==='confirmPost'){ var pj=byId(draft.job), pn=(document.getElementById('pNote').value||'').trim(), nd=document.getElementById('newDate').value;
     if(!draft.reason){ showErr('pErr','בחר סיבה.'); return; } if(draft.reason==='אחר' && !pn){ showErr('pErr','ב״אחר״ צריך פירוט.'); return; }
@@ -669,11 +886,16 @@ document.addEventListener('click',function(ev){
     rr.status='reassign'; rr.result={at:Date.now(), reason:w, level:draft.level||''}; after('↩ '+rr.name+' — חזר למשרד'); return; }
   if(t.id==='closeDay'){ if(!confirm('לסגור את היום ולשלוח את הסיכום למשרד?')) return; closeDay(); return; }
 });
+/* the form's text fields are saved as they are typed */
+document.addEventListener('input',function(ev){ var t=ev.target; if(state.view!=='form') return; var j=byId(state.formJob); if(!j) return; var fd=formOf(j), ds=t.dataset||{};
+  if(ds.fh) fd.head[ds.fh]=t.value; else if(ds.fx) fd[ds.fx]=t.value; else if(ds.fdev) fd.devices[ds.fdev]=t.value; else if(ds.fp){ if(ds.fp==='devices') fd.devicesText=t.value; else fd[ds.fp]=t.value; } else return;
+  fd.done=false; try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} });
 document.addEventListener('input',function(ev){ var t=ev.target; if(!draft) return;
   if(t.id==='tot'){ t.dataset.touched='1'; var c=byId(draft.job), v=parseFloat(t.value.replace(',','.')), wb=document.getElementById('whyBox'); if(wb) wb.hidden=!(c.officePrice && v>0 && Math.abs(v-c.officePrice)>0.009); } });
 document.addEventListener('change',function(ev){ var t=ev.target;
   if(t.id==='imp'){ var f=t.files && t.files[0]; t.value=''; if(f) importPdf(f); return; }
   if(t.id==='plPick' && t.value!==''){ var p=PRICES[+t.value]; draft.exec.push({text:p[0], price:p[1]}); t.value=''; drawExec(); return; }
+  if(t.dataset && t.dataset.photo==='fpaper'){ var fj=byId(state.formJob); readPhoto(t.files[0],function(u){ if(!fj) return; photos['f-'+fj.id]=u; savePhotos(); formOf(fj).done=false; save(); render(); }); return; }
   if(t.dataset && t.dataset.photo){ var k=t.dataset.photo; readPhoto(t.files[0],function(u){ if(!draft) return; draft[k]=u; var pv=document.getElementById(k+'Prev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="התמונה">'; }); }
 });
 
