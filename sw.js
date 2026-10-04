@@ -2,7 +2,7 @@
    The app shell is served from this version's cache (cache-first). A new version installs in the
    background and WAITS; the page activates it only when no round is open (applyUpdate in index.html).
    So a push to the site never swaps the app under a driver in the middle of a delivery day. */
-const CACHE = 'gazgal-driver-v3.3';
+const CACHE = 'gazgal-driver-v3.3.1';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './vendor/pdf.min.js', './vendor/pdf.worker.min.js', './vendor/html2canvas.min.js', './vendor/jspdf.umd.min.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))));
@@ -26,6 +26,7 @@ self.addEventListener('fetch', e => {
   }
   if (e.request.method !== 'GET') return;
   const u = new URL(e.request.url);
+  if (u.origin === location.origin && u.pathname.startsWith('/tech')) return;   /* the technician app has its own service worker */
   if (u.origin === location.origin) {
     e.respondWith(caches.open(CACHE).then(async c => {
       /* every page load (including ?share=1) gets this version's index.html, never a newer one from the network */

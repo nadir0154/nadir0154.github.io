@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15212E">
+<meta name="description" content="יומן הטכנאי של גז גל — עבודות היום לפי חלונות זמן, ביצוע, גבייה וסיכום למשרד.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="../icon-192.png">
+<title>יומן טכנאי גזגל</title>
+<script defer src="../vendor/pdf.min.js"></script>
+<script defer src="../vendor/pdf.worker.min.js"></script>
+<style>
+:root{
+  --bg:#EDEFEA; --surface:#FFFFFF; --surface-2:#F6F7F4; --ink:#131B24; --muted:#5B6571; --line:#D8DCD4;
+  --accent:#E3601B; --accent-ink:#FFFFFF; --accent-soft:#FCE7DA;
+  --nav:#15212E; --nav-ink:#EEF1EC; --nav-muted:#8E9AA6;
+  --ok:#1B7F4D; --on-ok:#FFFFFF; --ok-bg:#DFF1E6; --bad:#BD3528; --bad-bg:#F7E0DC;
+  --warn:#7D5A00; --warn-bg:#FAEFC9; --info:#285683; --info-bg:#E1EAF4;
+  --shadow:0 1px 2px rgba(20,30,40,.06),0 6px 18px rgba(20,30,40,.07);
+  --display:"Secular One","Assistant",system-ui,sans-serif;
+  --body:"Assistant",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0D131A; --surface:#161F29; --surface-2:#1C2733; --ink:#EDF0EB; --muted:#9BA5B0; --line:#29343F;
+    --accent:#F0793A; --accent-ink:#1A0F08; --accent-soft:#3A2214;
+    --nav:#080C11; --nav-ink:#EDF0EB; --nav-muted:#7C8894;
+    --ok:#4DBA80; --on-ok:#08170F; --ok-bg:#132C1F; --bad:#EC6E60; --bad-bg:#371816; --warn:#E3B84B; --warn-bg:#30270D; --info:#86B4E2; --info-bg:#152536;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0D131A; --surface:#161F29; --surface-2:#1C2733; --ink:#EDF0EB; --muted:#9BA5B0; --line:#29343F;
+  --accent:#F0793A; --accent-ink:#1A0F08; --accent-soft:#3A2214;
+  --nav:#080C11; --nav-ink:#EDF0EB; --nav-muted:#7C8894;
+  --ok:#4DBA80; --on-ok:#08170F; --ok-bg:#132C1F; --bad:#EC6E60; --bad-bg:#371816; --warn:#E3B84B; --warn-bg:#30270D; --info:#86B4E2; --info-bg:#152536;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);margin:0}
+[hidden]{display:none!important}
+img{max-width:100%}
+body{font-family:var(--body);color:var(--ink);font-size:16px;line-height:1.45}
+#app{max-width:520px;margin:0 auto;padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.demo{background:var(--warn-bg);color:var(--warn);font-size:13px;font-weight:700;text-align:center;padding:6px 16px}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--nav);color:var(--nav-ink);padding:10px 16px 12px;display:grid;gap:8px}
+.topbar .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.topbar .j{font-size:13px;color:var(--nav-muted);font-weight:600}
+.topbar .cash{font-family:var(--display);font-size:20px}
+.topbar .cash small{font-family:var(--body);font-size:12px;color:var(--nav-muted);font-weight:600;margin-inline-start:6px}
+.bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+main{padding:16px;display:grid;gap:16px}
+h1,h2,h3{margin:0;text-wrap:balance}
+.eyebrow{font-size:12px;letter-spacing:.06em;font-weight:800;color:var(--muted)}
+.card{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);padding:16px;display:grid;gap:12px}
+.next{border-top:5px solid var(--accent);padding-top:14px}
+.next .name{font-family:var(--display);font-size:27px;line-height:1.15}
+.addr{font-size:18px;font-weight:600}
+.city{display:inline-block;margin-inline-start:6px;font-size:13px;font-weight:700;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:1px 9px;vertical-align:2px}
+.collect{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:12px 14px;font-weight:800}
+.collect .big{font-family:var(--display);font-size:28px;font-weight:400}
+.collect small{display:block;font-size:13px;font-weight:700}
+.c-collect{background:var(--accent-soft);color:var(--accent)}
+.c-verify{background:var(--warn-bg);color:var(--warn)}
+.c-paid{background:var(--ok-bg);color:var(--ok)}
+.c-credit{background:var(--info-bg);color:var(--info)}
+.items{display:flex;flex-wrap:wrap;gap:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;border:2px solid var(--ink);border-radius:10px;padding:4px 10px;font-weight:800;font-size:17px}
+.pill .kg{font-size:13px;font-weight:700;color:var(--muted)}
+.note{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
+.okbox{background:var(--ok-bg);color:var(--ok);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
+.mem{background:var(--surface-2);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;font-size:14px;display:grid;gap:6px}
+.mem img{border-radius:8px;max-height:140px;object-fit:cover}
+.acts{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px}
+.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:58px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface-2);font-weight:800;font-size:14px;text-decoration:none;color:var(--ink)}
+.act b{font-size:20px;line-height:1}
+.act.waze{background:var(--info-bg);border-color:transparent;color:var(--info)}
+.go{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.btn{border:0;border-radius:14px;min-height:60px;font-weight:800;font-size:19px;padding:0 14px}
+.btn-ok{background:var(--ok);color:var(--on-ok)}
+.btn-bad{background:var(--surface);color:var(--bad);border:2px solid var(--bad)}
+.btn-accent{background:var(--accent);color:var(--accent-ink)}
+.btn-ghost{background:transparent;border:2px solid var(--line);color:var(--ink)}
+.btn-sm{min-height:44px;font-size:16px;border-radius:11px}
+.list{display:grid;gap:8px}
+.li{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:10px;background:var(--surface);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow);text-align:start;border:0;width:100%}
+.li .n{font-family:var(--display);color:var(--muted);text-align:center}
+.li .t{font-weight:800;line-height:1.2}
+.li .s{font-size:14px;color:var(--muted)}
+.li .ctl{display:flex;gap:4px}
+.li.sel{outline:3px solid var(--accent)}
+.li.sel .n{color:var(--accent);font-size:20px}
+.ic{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--line);background:var(--surface-2);font-weight:800}
+.tag{font-size:12px;font-weight:800;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.t-ok{background:var(--ok-bg);color:var(--ok)} .t-bad{background:var(--bad-bg);color:var(--bad)} .t-acc{background:var(--accent-soft);color:var(--accent)} .t-info{background:var(--info-bg);color:var(--info)} .t-warn{background:var(--warn-bg);color:var(--warn)}
+.sec{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.sec h3{font-size:17px}
+.muted{color:var(--muted)}
+.nav{position:fixed;inset-inline:0;bottom:0;z-index:30;background:var(--nav);padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px))}
+.nav .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tab{background:transparent;border:0;color:var(--nav-muted);font-weight:800;font-size:14px;min-height:54px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.tab b{font-size:19px}
+.tab[aria-current="page"]{color:var(--nav-ink);background:rgba(255,255,255,.08)}
+.fab{position:fixed;z-index:31;bottom:calc(80px + env(safe-area-inset-bottom,0px));inset-inline-end:max(16px,calc(50% - 244px));min-height:52px;padding:0 18px;border-radius:999px;background:var(--accent);color:var(--accent-ink);border:0;font-size:17px;font-weight:800;box-shadow:var(--shadow)}
+.scrim{position:fixed;inset:0;background:rgba(8,12,17,.5);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:520px;max-height:92%;overflow:auto;border-radius:18px 18px 0 0;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));display:grid;gap:14px}
+.sheet .grab{width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet h2{font-family:var(--display);font-weight:400;font-size:23px}
+.field{display:grid;gap:6px}
+.field>label,.lbl{font-weight:800;font-size:14px;color:var(--muted)}
+.inp{width:100%;min-height:48px;border-radius:11px;border:1.5px solid var(--line);background:var(--surface);padding:8px 12px;font-size:17px}
+textarea.inp{min-height:70px;resize:vertical}
+.steps{display:grid;gap:8px}
+.step{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;background:var(--surface);border-radius:12px;padding:8px 12px}
+.step .l{font-weight:800}
+.step .l small{display:block;font-weight:600;font-size:13px;color:var(--muted)}
+.stp{display:flex;align-items:center;gap:6px}
+.stp button{width:46px;height:46px;border-radius:11px;border:1.5px solid var(--line);background:var(--surface-2);font-size:24px;font-weight:800}
+.stp output{min-width:34px;text-align:center;font-family:var(--display);font-size:24px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:2px solid var(--line);background:var(--surface);border-radius:12px;min-height:48px;padding:0 14px;font-weight:800;font-size:16px}
+.chip[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+.sum{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border-radius:12px;padding:12px 14px;font-weight:800}
+.sum .big{font-family:var(--display);font-size:26px;font-weight:400}
+.photo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.thumb{width:64px;height:64px;object-fit:cover;border-radius:10px}
+.filebtn{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--line);border-radius:11px;min-height:48px;padding:0 14px;font-weight:800;background:var(--surface)}
+.filebtn.big{min-height:60px;border-style:solid;border-color:var(--accent);color:var(--accent);font-size:18px}
+.filebtn input{position:absolute;inset:0;opacity:0}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.err{font-size:14px;color:var(--bad);font-weight:800;margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{background:var(--surface-2);border-radius:12px;padding:12px;display:grid;gap:2px}
+.kpi .v{font-family:var(--display);font-size:24px}
+.kpi .k{font-size:13px;font-weight:700;color:var(--muted)}
+.cgrid{display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;align-items:center}
+.cgrid .h{font-size:13px;font-weight:800;color:var(--muted);text-align:center}
+.cgrid .r{font-weight:800;padding-inline-end:4px}
+.cin{width:100%;min-height:60px;border-radius:12px;border:2px solid var(--line);background:var(--surface);text-align:center;font-family:var(--display);font-size:30px;padding:0 6px}
+.cin:focus{border-color:var(--accent);outline:none}
+.cin.has{border-color:var(--ink)}
+.msg{white-space:pre-line;background:var(--surface);border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;font-weight:700;line-height:1.5}
+.linkbtn{display:flex;align-items:center;justify-content:center;text-decoration:none}
+details.amg{background:var(--surface-2);border-radius:12px;padding:6px 12px 10px}
+details.amg summary{font-weight:800;cursor:pointer;min-height:40px;display:flex;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:start}
+th{font-size:12px;color:var(--muted);font-weight:800;letter-spacing:.04em}
+td.v,th.v{text-align:end}
+.tbl{overflow-x:auto}
+.report{font-size:15px;display:grid;gap:10px}
+.report h3{font-size:16px}
+.mismatch{color:var(--bad);font-weight:800}
+.match{color:var(--ok);font-weight:800}
+.hero{display:grid;gap:4px}
+.hero h1{font-family:var(--display);font-weight:400;font-size:30px}
+.toast{position:fixed;inset-inline:16px;bottom:calc(140px + env(safe-area-inset-bottom,0px));z-index:50;max-width:488px;margin:0 auto;background:var(--ink);color:var(--bg);border-radius:12px;padding:12px 14px;font-weight:800;text-align:center}
+.done-li{opacity:.82}
+.li-main{background:none;border:0;padding:0;text-align:start;min-width:0;min-height:44px}
+.drag{width:38px;height:44px;display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--muted);touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.li.dragging{position:relative;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.28);outline:2px solid var(--accent)}
+.li.shift{transition:transform .15s}
+.custline{font-size:15px;color:var(--muted);margin-top:-6px}
+.custline b{color:var(--ink)}
+.linkish{background:var(--surface-2);border:1.5px dashed var(--line);border-radius:12px;min-height:48px;padding:6px 12px;text-align:start;font-size:15px;color:var(--ink)}
+.hist{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+/* the printable A4 report — always black on white, whatever the phone's theme */
+#printRoot{display:none}
+.docwrap{overflow:hidden;margin:0 auto;min-width:0;width:100%}
+.paper{width:794px;height:1123px;background:#fff;color:#000;padding:38px 42px 30px;box-sizing:border-box;position:relative;overflow:hidden;margin:0 auto 16px;box-shadow:0 2px 10px rgba(0,0,0,.25);font-family:Arial,"Assistant",sans-serif;font-size:13px;line-height:1.35;direction:rtl}
+.paper h1{font-size:20px;margin:0}
+.paper .hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #000;padding-bottom:6px;margin-bottom:12px;gap:10px}
+.paper .hdr .f{font-size:14px}
+.paper .hdr .f b{font-size:15px}
+.paper table{border-collapse:collapse;width:auto;font-size:12.5px}
+.paper td,.paper th{border:1.2px solid #000;padding:4px 7px;text-align:center;color:#000;letter-spacing:0}
+.paper th{font-weight:700;font-size:12px;background:#eee}
+.paper .lbl2{font-weight:700;text-align:start;border:0;padding-inline-end:10px;white-space:nowrap}
+.paper .row2{display:flex;gap:26px;align-items:flex-start;margin:6px 0 10px}
+.paper .sec2{font-weight:700;font-size:14px;margin:12px 0 5px;text-decoration:underline}
+.paper .big2{font-size:15px;font-weight:700}
+.paper .wide{width:100%}
+.paper .wide td,.paper .wide th{text-align:start}
+.paper .wide td.c{text-align:center}
+.paper .ord{font-size:11.5px}
+.paper .ord td,.paper .ord th{padding:3px 4px}
+.paper .ord td.c{width:26px}
+.paper .ord .nm{width:175px}
+.paper .ord td:last-child{width:150px}
+.paper .ord .ad{font-size:10px;font-weight:400;color:#333}
+.paper .ord td.chg{font-weight:800;text-decoration:underline;font-size:13px}
+.paper .grp td{background:#e6e6e6;font-weight:700;text-align:start}
+.paper .warn2{font-weight:700}
+.paper .sig{display:grid;grid-template-columns:1fr 1fr;gap:10px 30px;margin-top:10px}
+.paper .sig div{border-bottom:1.2px solid #000;padding-top:18px;font-size:12.5px}
+.paper .foot{position:absolute;bottom:14px;inset-inline:42px;display:flex;justify-content:space-between;font-size:10.5px;color:#444}
+.paper .ok2{font-weight:700}
+.paper .bad2{font-weight:700;text-decoration:underline}
+.paper ul{margin:2px 0;padding-inline-start:18px}
+/* FEEDBACK #48: the delivery note is as long as its content, not a full A4 */
+.paper.dnp{height:auto;padding-bottom:44px;font-size:14px}
+.paper.dnp td,.paper.dnp th{padding:6px 8px}
+.sigpad{display:block;width:100%;height:190px;background:#fff;border:2px dashed var(--line);border-radius:12px;touch-action:none;cursor:crosshair}
+@media print{
+  @page{size:A4;margin:0}
+  html,body{background:#fff!important}
+  #app,#sheetRoot,#toastRoot{display:none!important}
+  #printRoot{display:block!important}
+  .paper{margin:0;box-shadow:none;page-break-after:always;break-after:page}
+}
+.center{text-align:center}
+.loading{display:grid;place-items:center;gap:10px;padding:40px 0;font-weight:800}
+.spin{width:36px;height:36px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}.bar i{transition:none}}
+</style>
+<style>
+/* the technician app: the driver app's look, plus the job card */
+.win{display:inline-flex;align-items:center;gap:6px;font-weight:800;border-radius:10px;padding:6px 10px;background:var(--info-bg);color:var(--info);font-size:16px}
+.win.late{background:var(--bad-bg);color:var(--bad)}
+.lines{display:grid;gap:6px}
+.ln{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:start;background:var(--surface-2);border-radius:10px;padding:8px 10px;font-size:15px}
+.ln .code{font-size:12px;font-weight:800;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1px 6px;white-space:nowrap}
+.ln .pr{font-weight:800;color:var(--accent);white-space:nowrap}
+.ln.exe{background:var(--ok-bg)}
+.cols{display:grid;gap:4px}
+.cols h4{margin:4px 0 0;font-size:13px;color:var(--muted);letter-spacing:.04em}
+</style>
+
+<div id="app" dir="rtl" lang="he"></div>
+<div id="sheetRoot" dir="rtl" lang="he"></div>
+<div id="toastRoot" dir="rtl" lang="he"></div>
+
+<script>
+(function(){
+/* ================= יומן טכנאי — prototype (04/10/2026) =================
+   Kassem first. The office prints the technician's day from Bashan ("יומן עבודות לטכנאי", GG-645) as a PDF, the
+   same way it does the driver's journal; the app reads it on the phone. Unlike a driver's stop, a technician's job has
+   a time window the customer agreed with the office — the route follows the windows first, and the map only inside a
+   window. A job is a conversation in two columns (UC-18): what the office wrote ("תקלה") and what the technician did
+   ("ביצוע"). It ends done, postponed (with a new date — never "done" when it was not), or back to the office for
+   another technician. The office page shows the day live, with a progress bar. */
+
+var BOT_API = location.hostname==='localhost' ? 'http://localhost:8787' : 'https://bot.gazgal.com';
+var KEY='gazgal-tech-v1', BOT_KEY_LS='gazgal-tech-key', BOT_ST_LS='gazgal-tech-status';
+var OFFICE_TEL='0542222968', OFFICE_WA='972542222968';
+var PAY={cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המשרד', later:'ישלם למשרד', prepaid:'שולם מראש', unpaid:'לא שולם', none:'ללא חיוב'};
+var CODES={'100':'בדיקה תקנית','90':'חיבור כיריים','71':'אספקה','74':'אספקה','77':'התקנה','40':'התקנת מונה'};
+var POSTPONE=['הלקוח ביקש לדחות','הלקוח לא בבית','אין גישה','חסר ציוד / חלק','לא הספקתי היום','אחר'];
+var CASUAL='99999999';
+/* the technician price list of 01/10/2026 (GazGalV/Technician) — a starting point; the price on site is the technician's */
+var PRICES=[['ביקור טכנאי',250],['ביקור לבדיקת מחמם מים',350],['ב. תקנית — חברה זרה',100],['חיבור כיריים / תנור + ב. תקנית',250],['חיבור מנגל לתשתית קיימת + ב. תקנית',250],
+  ['חיבור מנגל לבלון (וסת + צינור)',360],['החלפת וסת',350],['החלפת סליל',350],['החלפת סליל + וסת',450],['נקודה נוספת (עד 3 מ׳)',430],['הזזת נקודה קיימת',350],
+  ['הזזת נקודה + חיבור כיריים',400],['הזזת מיכלים / נקודה',350],['הזזת ברז גז לא נגיש',350],['הגבהת מערכת',350],['מכסה לעמדת מיכלים',350],['מטר צינור 3/8" נוסף',50],
+  ['התקנה ללא מיכלים (3 מ׳ + ברז + וסת)',600],['התקנה 2×12 קומפלט',1050],['התקנה 2×48 קומפלט',2090],['התקנת חגז תקני (כולל חגז)',600],['התקנת מונה חדש',900],['התקנת מונה חוזר',700]];
+
+var state, draft=null, photos={};
+function fresh(){ return {source:'none', journal:'', date:'', tech:'', techNo:'', jobs:[], phase:'morning', view:'route', memory:(state&&state.memory)||{}}; }
+function load(){ try{ var s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s && s.jobs) return s; }catch(e){} return fresh(); }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} scheduleLive(); }
+state=load();
+
+/* ---------- small helpers (as in the driver app) ---------- */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function money(n){ n=Math.round((+n||0)*100)/100; return '₪'+n.toLocaleString('he-IL',{minimumFractionDigits:(n%1?2:0),maximumFractionDigits:2}); }
+function toast(msg){ var r=document.getElementById('toastRoot'); r.innerHTML='<div class="toast" role="status">'+esc(msg)+'</div>'; clearTimeout(toast.t); toast.t=setTimeout(function(){ r.innerHTML=''; },2800); }
+function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+function lsGet(k,d){ try{ return JSON.parse(localStorage.getItem(k)||'null')||d; }catch(e){ return d; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function dateStr(d){ return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear(); }
+function todayStr(){ return dateStr(new Date()); }
+function hhmm(t){ return new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}); }
+function mins(s){ var m=/(\d{1,2}):(\d\d)/.exec(s||''); return m ? +m[1]*60+ +m[2] : null; }
+function nowMin(){ var d=new Date(); return d.getHours()*60+d.getMinutes(); }
+function hm(n){ return ('0'+Math.floor(n/60)).slice(-2)+':'+('0'+(n%60)).slice(-2); }
+function intl(num){ return '972'+String(num).replace(/\D/g,'').replace(/^0/,''); }
+function readPhoto(file,cb){ if(!file) return; var fr=new FileReader();
+  fr.onload=function(){ var img=new Image(); img.onload=function(){ var k=Math.min(1,1000/Math.max(img.width,img.height)), c=document.createElement('canvas');
+    c.width=Math.round(img.width*k); c.height=Math.round(img.height*k); c.getContext('2d').drawImage(img,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72)); }; img.src=fr.result; };
+  fr.readAsDataURL(file); }
+function photoPick(kind,label){ return '<div class="photo"><label class="filebtn">📷 '+label+'<input type="file" accept="image/*" capture="environment" data-photo="'+kind+'"></label>'+
+  '<label class="filebtn">🖼️ מהגלריה<input type="file" accept="image/*" data-photo="'+kind+'"></label><span id="'+kind+'Prev"></span></div>'; }
+function custNo(j){ return j.cust && j.cust!==CASUAL ? j.cust : ''; }
+function addr(j){ return [j.street, j.house].filter(Boolean).join(' ')+(j.apt?', דירה '+j.apt:''); }
+function byId(id){ return state.jobs.filter(function(j){ return j.id===id; })[0]; }
+function pending(){ return state.jobs.filter(function(j){ return j.status==='pending'; }); }
+function done(){ return state.jobs.filter(function(j){ return j.status!=='pending'; }); }
+function cur(){ return pending()[0]||null; }
+function dayOf(){ return state.date||state.day||todayStr(); }   /* the journal is for one date — the jobs' date */
+
+/* ---------- photos stay in the phone (IndexedDB) ---------- */
+var dbp=null;
+function idb(){ if(!dbp) dbp=new Promise(function(res,rej){ try{ var r=indexedDB.open('gazgal-tech',1); r.onupgradeneeded=function(){ r.result.createObjectStore('kv'); }; r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); }; }catch(e){ rej(e); } }); return dbp; }
+function idbPut(k,v){ return idb().then(function(d){ return new Promise(function(res){ var tx=d.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=res; tx.onerror=res; }); }); }
+function idbGet(k){ return idb().then(function(d){ return new Promise(function(res){ var rq=d.transaction('kv').objectStore('kv').get(k); rq.onsuccess=function(){ res(rq.result); }; rq.onerror=function(){ res(null); }; }); }); }
+function savePhotos(){ idbPut('photos',photos).catch(function(){}); }
+idbGet('photos').then(function(p){ if(p){ photos=p; } }).catch(function(){});
+
+/* ================= reading the journal (Bashan GG-645, "יומן עבודות לטכנאי") =================
+   A landscape page (rotated 90°), one row per job and its lines under it. Columns by x (after the page rotation):
+   order 772 · date 715 · to 680 · from 648 · type 630 (לק / צר) · customer 575–600 · name 470–570 · central 413 ·
+   meter 355–385 · street 280–345 · house ~250 · flat ~225 · town 160–210 · phone 1 ~83 · phone 2 ~21 · technician ~7.
+   Lines: from 704 · to 674 · code 270–290 · text 100–268 · price < 70. A job's lines can go on to the next page. */
+async function pdfItems(buf){
+  var pdf=await pdfjsLib.getDocument({data:buf, isEvalSupported:false}).promise, pages=[];
+  for(var p=1;p<=pdf.numPages;p++){ var page=await pdf.getPage(p), vp=page.getViewport({scale:1}), tc=await page.getTextContent();
+    pages.push(tc.items.filter(function(t){ return t.str && t.str.trim(); }).map(function(t){ var m=pdfjsLib.Util.transform(vp.transform, t.transform);
+      return {s:t.str.trim(), x:m[4], y:m[5], w:t.width}; })); }
+  return pages;
+}
+function joinWords(items){   /* right to left; pieces that touch (ש " ח) stay together */
+  items=items.slice().sort(function(a,b){ return b.x-a.x; }); var out='', prev=null;
+  items.forEach(function(t){ out += prev && (prev.x-(t.x+t.w))<1.5 ? t.s : (out?' ':'')+t.s; prev=t; }); return out.trim(); }
+function inX(items,a,b){ return items.filter(function(t){ return t.x>=a && t.x<b; }); }
+function parseTechJournal(pages){
+  var meta={no:'', date:'', tech:'', techNo:'', total:null}, jobs=[], job=null;
+  pages.forEach(function(items){
+    var rows=[]; items.slice().sort(function(a,b){ return a.y-b.y; }).forEach(function(t){ var r=rows[rows.length-1]; if(r && Math.abs(r.y-t.y)<=1.5) r.items.push(t); else rows.push({y:t.y, items:[t]}); });
+    var head=rows.filter(function(r){ return r.y>80 && r.y<95; })[0], top=head ? head.y : 87;
+    /* a job's header is spread over 2–3 rows around its order number (the address row is a point above it) */
+    var ords=[]; rows.forEach(function(r){ var o=inX(r.items,755,800).filter(function(t){ return /^\d{4,6}$/.test(t.s); })[0]; if(o && r.y>top+3) ords.push({y:r.y, id:o.s}); });
+    rows.forEach(function(r){ var tx=joinWords(r.items);
+      if(r.y<top-5){   /* the page header */
+        var jn=/יומן עבודות (\d+)/.exec(tx); if(jn) meta.no=jn[1];
+        var dt=/תאריך\s*:\s*(\d\d\/\d\d\/\d{4})/.exec(tx); if(dt && r.y>30) meta.date=dt[1];
+        if(r.y>55 && r.y<70){ var tn=inX(r.items,640,700)[0]; if(tn) meta.techNo=tn.s; meta.tech=joinWords(inX(r.items,480,640)); }
+        return; }
+      if(Math.abs(r.y-top)<3) return;
+      var tot=/סה\s*"?\s*כ הזמנות\s*:\s*(\d+)/.exec(tx.replace(/"/g,'"')); if(tot){ meta.total=+tot[1]; return; }
+      var near=ords.filter(function(o){ return Math.abs(o.y-r.y)<=3.5; })[0];
+      if(near){ if(!job || job.id!==near.id){ job={id:near.id, row:jobs.length+1, items:[], lines:[]}; jobs.push(job); } job.items=job.items.concat(r.items); return; }
+      if(!job) return;   /* lines before the first job on a page belong to the last job of the page before */
+      if(inX(r.items,665,712).length===r.items.length) return;   /* only the window repeated — no text on this line */
+      var code=inX(r.items,268,295).filter(function(t){ return /^\d{1,5}$/.test(t.s); })[0], price=inX(r.items,0,70).filter(function(t){ return /^[\d,.]+$/.test(t.s); })[0];
+      var text=joinWords(inX(r.items,95,268));
+      if(text || code || price) job.lines.push({code:code?code.s:'', text:text, price:price?parseFloat(price.s.replace(/,/g,'')):null});
+    }); });
+  /* the header row of each job, by column */
+  jobs.forEach(function(j){ var it=j.items, g=function(a,b){ return joinWords(inX(it,a,b)); };
+    j.date=g(700,740); j.to=g(668,700); j.from=g(640,668); j.type=g(615,640); j.cust=g(572,602).replace(/\D/g,'');
+    j.name=g(462,572).replace(/[()]/g,function(c){ return c==='('?')':'('; });   /* the PDF keeps brackets in visual (mirrored) order */
+    j.central=g(395,440).replace(/\D/g,''); j.meter=g(345,395).replace(/\D/g,''); j.street=g(275,345); j.house=g(238,262); j.apt=g(212,238); j.city=g(150,212);
+    j.phones=[g(60,120), g(12,60)].map(function(p){ return p.replace(/[^\d-]/g,''); }).filter(Boolean);
+    /* a line "<name> <role> 05x-xxxxxxx -" is a contact; "נאמר ללקוח 250 ש"ח" is the office's price */
+    j.contacts=[]; var kept=[];
+    j.lines.forEach(function(l){ var m=/^(.*?)\s*(0\d{1,2}-?\d{6,8})\s*-?$/.exec(l.text);
+      if(m && !l.code && !/ש"?ח/.test(l.text)){ var nm=m[1].replace(/\s*-\s*$/,'').trim(), pv=kept[kept.length-1];
+        /* "יוסף אבא של הלל בעל הנכס משלם -" and the phone on the next line are one contact */
+        if(!nm && pv && !pv.code && !pv.price && /-\s*$/.test(pv.text)){ nm=pv.text.replace(/\s*-\s*$/,''); kept.pop(); }
+        j.contacts.push({name:nm, phone:m[2]}); } else kept.push(l); });
+    j.lines=kept;
+    /* the office's price: what it told the customer ("נאמר ללקוח 1,500 ש"ח"). A per-meter / per-unit price ("כל מ' נוסף 50 ש"ח")
+       is not added. Without any "said" amount — the price column of the lines. */
+    var said=0, col=0; j.lines.forEach(function(l){ var unit=/נוסף|כל מ|למטר|ליחידה/.test(l.text);
+      var p=/(?:נאמר|מחיר|עלות|תשלם)[^\d]*?([\d,]{2,7})\s*ש"?ח/.exec(l.text) || /([\d,]{2,7})\s*ש"ח/.exec(l.text);
+      if(p){ l.said=parseFloat(p[1].replace(/,/g,'')); if(unit) l.unit=true; else said+=l.said; } if(l.price) col+=l.price; });
+    j.officePrice=said||col||null;
+    j.prepaid=j.lines.some(function(l){ return /שולם מראש/.test(l.text); }); j.free=j.lines.some(function(l){ return /ללא עלות|ללא תשלום/.test(l.text); });
+    j.needs=j.lines.filter(function(l){ return /^(לקחת|להביא|לדאוג)/.test(l.text); }).map(function(l){ return l.text; });
+    j.inspection=j.lines.some(function(l){ return l.code==='100' || /בדיקה תקנית/.test(l.text); });
+    j.form=j.inspection ? (j.type==='צר' ? 'ד׳-3' : 'ד׳-4') : '';
+    j.status='pending'; j.result=null; delete j.items; });
+  return {meta:meta, jobs:jobs};
+}
+async function importPdf(file){
+  if(!window.pdfjsLib){ toast('קורא ה־PDF עוד לא נטען — נסה שוב בעוד רגע'); return false; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = (document.querySelector('script[src*="pdf.worker"]')||{}).src || '';
+  try{
+    var r=parseTechJournal(await pdfItems(await file.arrayBuffer()));
+    if(!r.jobs.length){ toast('לא מצאתי עבודות בקובץ. זה ״יומן עבודות לטכנאי״ (GG-645)?'); return false; }
+    var mem=state.memory; state=fresh(); state.memory=mem||{};
+    state.source='pdf'; state.journal=r.meta.no; state.date=r.jobs[0].date ? r.jobs[0].date.replace(/(\d\d)\/(\d\d)\/(\d\d)$/,'$1/$2/20$3') : r.meta.date; state.tech=r.meta.tech; state.techNo=r.meta.techNo; state.jobs=r.jobs;
+    if(r.meta.total!=null && r.meta.total!==r.jobs.length) toast('⚠ ביומן כתוב '+r.meta.total+' הזמנות ונקראו '+r.jobs.length+' — לבדוק');
+    else toast('✓ נקראו '+r.jobs.length+' עבודות');
+    save(); render(); return true;
+  }catch(e){ toast('לא הצלחתי לקרוא את הקובץ'); try{ console.error(e); }catch(_){} return false; }
+}
+
+/* ================= the route: windows first, the map inside a window =================
+   Jobs sorted by the window's start; jobs with the same window are ordered by the map, from where the previous one
+   ends. The technician can always move a job up — the app then just warns if a later window would be missed. */
+var geo=lsGet('gazgal-geo-v1',{}), lastGeo=0;
+async function geocode(q){ if(Object.prototype.hasOwnProperty.call(geo,q)) return geo[q];
+  var w=1100-(Date.now()-lastGeo); if(w>0) await sleep(w); lastGeo=Date.now();
+  var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he&q='+encodeURIComponent(q)); if(!r.ok) throw new Error('geo');
+  var j=await r.json(), p=(j&&j[0])?[parseFloat(j[0].lat),parseFloat(j[0].lon)]:null; geo[q]=p; lsSet('gazgal-geo-v1',geo); return p; }
+async function locate(j){ var m=state.memory[j.cust]; if(m && m.points && m.points[0]) return [m.points[0].lat, m.points[0].lon]; if(m && m.lat) return [m.lat,m.lon];
+  if(j.street){ var p=await geocode((j.street+' '+(j.house||'')).trim()+', '+j.city); if(p) return p; }
+  if(j.city) return await geocode(j.city); return null; }
+function dist(a,b){ var rad=Math.PI/180, dLa=(b[0]-a[0])*rad, dLo=(b[1]-a[1])*rad, h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a[0]*rad)*Math.cos(b[0]*rad)*Math.sin(dLo/2)*Math.sin(dLo/2); return 12742*Math.asin(Math.sqrt(h)); }
+function driveMin(a,b){ return Math.max(3, Math.round(dist(a,b)*1.35/50*60)); }
+async function orderByWindows(){
+  var app=document.getElementById('app'), P=pending(); app.innerHTML='<main><div class="loading"><div class="spin"></div>ממקם כתובות במפה…</div></main>';
+  for(var i=0;i<P.length;i++){ if(P[i].pt===undefined){ try{ P[i].pt=await locate(P[i]); }catch(e){ P[i].pt=null; } } }
+  var groups={}; P.forEach(function(j){ var k=(mins(j.from)||0)+'-'+(mins(j.to)||0); (groups[k]=groups[k]||[]).push(j); });
+  var keys=Object.keys(groups).sort(function(a,b){ return (+a.split('-')[0])-(+b.split('-')[0]) || (+a.split('-')[1])-(+b.split('-')[1]); }), out=[], at=null;
+  keys.forEach(function(k){ var left=groups[k].slice();
+    while(left.length){ var bi=0; if(at){ var bd=Infinity; left.forEach(function(j,i){ if(j.pt){ var d=dist(at,j.pt); if(d<bd){ bd=d; bi=i; } } }); }
+      var nx=left.splice(bi,1)[0]; out.push(nx); if(nx.pt) at=nx.pt; } });
+  state.jobs=done().concat(out); state.phase='route'; save(); render(); window.scrollTo(0,0); toast('סודר לפי חלונות הזמן, ובתוך כל חלון לפי המפה');
+}
+/* when will he get to each job: now (or the last finish) + driving + the time at a job (measured today; 40 min until known) */
+function jobMin(){ var d=done().filter(function(j){ return j.result && j.result.start && j.result.at; }).map(function(j){ return (j.result.at-j.result.start)/60000; }).filter(function(m){ return m>3 && m<300; });
+  if(d.length<2) return 40; d.sort(function(a,b){ return a-b; }); return Math.round(d[Math.floor(d.length/2)]); }
+function etas(){ if(dayOf()!==todayStr()) return {};   /* a journal for another day (loaded the evening before): no estimates yet */
+  var t=nowMin(), at=null, last=done().filter(function(j){ return j.result && j.result.at; }).sort(function(a,b){ return b.result.at-a.result.at; })[0], svc=jobMin(), out={};
+  if(last && last.pt) at=last.pt;
+  pending().forEach(function(j,i){ var drive=at && j.pt ? driveMin(at,j.pt) : 15; var arrive=i===0 && j.startedAt ? mins(hhmm(j.startedAt)) : t+drive; var from=mins(j.from), to=mins(j.to);
+    if(from!=null && arrive<from) arrive=from; out[j.id]={eta:arrive, late: to!=null && arrive>to};
+    t=arrive+svc; if(j.pt) at=j.pt; });
+  return out; }
+
+/* ================= office link: pairing, journals from the office, live, the day's report ================= */
+var bot={status:lsGet(BOT_ST_LS,'off')||'off', journals:[]};
+function botKey(){ var k=null; try{ k=localStorage.getItem(BOT_KEY_LS); }catch(e){}
+  if(!k){ var a=new Uint8Array(32); crypto.getRandomValues(a); k=[].map.call(a,function(b){ return ('0'+b.toString(16)).slice(-2); }).join(''); try{ localStorage.setItem(BOT_KEY_LS,k); }catch(e){} } return k; }
+function botFetch(path,opt){ opt=opt||{}; opt.headers=Object.assign({authorization:'Bearer '+botKey()}, opt.headers||{}); return fetch(BOT_API+path,opt); }
+function setBot(s){ bot.status=s; lsSet(BOT_ST_LS,s); }
+async function pair(){
+  var code=(document.getElementById('admCode')||{}).value||'', who=(document.getElementById('admTech')||{}).value||'';
+  if(!code){ toast('קוד מנהל'); return; }
+  try{ await fetch(BOT_API+'/api/pair',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({key:botKey(), name:'טכנאי', role:'tech'})});
+    var r=await botFetch('/api/pair/admin',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code:code, tech:who})});
+    if(r.ok){ var j=await r.json(); setBot('active'); lsSet('gazgal-tech-name', j.name||''); closeSheet(); render(); toast('✓ מחובר למשרד — '+(j.name||'')); poll(); return; }
+    toast(r.status===429?'יותר מדי ניסיונות — נסה בעוד שעה':'הקוד לא נכון');
+  }catch(e){ toast('אין חיבור לשרת'); } }
+async function poll(){
+  if(bot.status!=='active') return;
+  try{ var r=await botFetch('/api/journals'); if(r.status===401||r.status===403){ setBot('off'); render(); return; }
+    if(r.ok){ var j=await r.json(), n=bot.journals.length; bot.journals=j.journals||[]; if(bot.journals.length>n){ toast('📄 הגיע יומן מהמשרד'); if(!document.querySelector('.scrim')) render(); } } }catch(e){}
+  flushReport();
+}
+async function loadOfficeJournal(id){
+  try{ var r=await botFetch('/api/journal/'+encodeURIComponent(id)); if(!r.ok){ toast('היומן כבר לא זמין — בקש מהמשרד לשלוח שוב'); return; }
+    var ok=await importPdf(await r.blob()); if(ok){ bot.journals=bot.journals.filter(function(x){ return x.id!==id; }); botFetch('/api/journal/'+encodeURIComponent(id)+'/done',{method:'POST'}).catch(function(){}); render(); } }
+  catch(e){ toast('אין קליטה — היומן לא ירד. נסה שוב.'); } }
+/* the office page sees the day as it goes: every job with its window and status — no phones, no money */
+function livePayload(pos){
+  var E=etas(), svc=jobMin();
+  var row=function(j,s){ var r=j.result||{}; return {o:j.id, n:j.name, c:custNo(j), a:addr(j), t:j.city, w:[j.from,j.to], s:s, at:r.at||0, why:r.reason||r.why||'', k:(j.lines.map(function(l){ return CODES[l.code]||''; }).filter(Boolean)[0]||''),
+    eta: E[j.id] ? E[j.id].eta : null, late: E[j.id] ? E[j.id].late : false, nt:(r.note||'').slice(0,200)||undefined, re:j.status==='reassign'||undefined}; };
+  return {kind:'tech', day:dayOf(), phase:state.phase, driver:state.tech, journals:[state.journal], svc:svc, lastAt:done().reduce(function(m,j){ return Math.max(m,(j.result||{}).at||0); },0),
+    stops: done().slice().sort(function(a,b){ return ((a.result||{}).at||0)-((b.result||{}).at||0); }).map(function(j){ return row(j, j.status==='done'?'done':'failed'); })
+      .concat(pending().map(function(j){ return row(j,'next'); })), pos:pos||null};
+}
+function scheduleLive(){ if(bot.status!=='active' || state.source!=='pdf') return; clearTimeout(scheduleLive.t); scheduleLive.t=setTimeout(sendLive, 5000); }
+async function sendLive(closed){ if(bot.status!=='active') return; var pos=null;
+  if(!closed && state.phase==='route'){ try{ var st=navigator.permissions ? await navigator.permissions.query({name:'geolocation'}) : null;
+    if(st && st.state==='granted') pos=await new Promise(function(res){ navigator.geolocation.getCurrentPosition(function(p){ res({lat:Math.round(p.coords.latitude*1e5)/1e5, lon:Math.round(p.coords.longitude*1e5)/1e5, at:Date.now()}); }, function(){ res(null); }, {maximumAge:60000, timeout:8000}); }); }catch(e){} }
+  try{ await botFetch('/api/live',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(closed?{closed:true}:livePayload(pos))}); }catch(e){} }
+function reportText(){
+  var L=['יומן טכנאי '+state.journal+' · '+dayOf()+' · '+(state.tech||''), ''], t={cash:0,cheque:0,nq:0,later:0,office:0};
+  state.jobs.forEach(function(j){ var r=j.result||{}, p=r.pay||{};
+    L.push((j.status==='done'?'✓ ':j.status==='postponed'?'⏸ ':j.status==='reassign'?'↩ ':'• ')+j.id+' '+j.name+(custNo(j)?' ('+custNo(j)+')':'')+' — '+
+      (j.status==='done' ? 'בוצע'+(r.exec&&r.exec.length?': '+r.exec.map(function(x){ return x.text+(x.price?' '+money(x.price):''); }).join(', '):'')+(r.note?' · '+r.note:'')+
+        (p.method && p.method!=='none' ? ' · '+PAY[p.method]+(p.amount?' '+money(p.amount):'')+(p.no?' מס׳ '+p.no:'') : '')+(r.changed?' · שונה ממחיר המשרד ('+money(j.officePrice)+'): '+r.why:'')+(r.follow?' · ⚠ צריך הזמנת המשך: '+r.follow:'')
+      : j.status==='postponed' ? 'נדחה — '+r.reason+(r.newDate?' · מועד חדש '+r.newDate:' · המשרד יתאם')+(r.note?' · '+r.note:'')
+      : j.status==='reassign' ? 'לשיבוץ מחדש — '+r.reason+(r.level?' · נדרשת רמה '+r.level:'')
+      : 'לא טופל'));
+    if(j.status==='done' && p.method){ if(p.method==='cash') t.cash+=p.amount||0; if(p.method==='cheque'){ t.cheque+=p.amount||0; t.nq++; } if(p.method==='later') t.later+=p.amount||0; if(p.method==='office') t.office+=p.amount||0; } });
+  L.push(''); L.push('קופה: מזומן '+money(t.cash)+' · צ׳קים '+money(t.cheque)+' ('+t.nq+')'+(t.office?' · אשראי דרך המשרד '+money(t.office):'')+(t.later?' · ישלמו למשרד '+money(t.later):''));
+  return {text:L.join('\n'), t:t};
+}
+async function closeDay(){
+  var R=reportText(), id=(state.date||todayStr()).split('/').reverse().join('-')+'-T'+state.journal;
+  var out=lsGet('gazgal-tech-outbox',[]); out.push({id:id, meta:{id:id, iso:id.slice(0,10), date:dayOf(), journals:[state.journal], driver:state.tech, del:state.jobs.filter(function(j){ return j.status==='done'; }).length, n:state.jobs.length,
+    cash:R.t.cash, cheque:R.t.cheque, nq:R.t.nq, later:R.t.later, text:R.text, tech:true}, snap:JSON.stringify(state)}); lsSet('gazgal-tech-outbox', out);
+  var hist=lsGet('gazgal-tech-history',[]); hist.unshift({id:id, date:dayOf(), journal:state.journal, text:R.text}); lsSet('gazgal-tech-history', hist.slice(0,60));
+  sendLive(true); var mem=state.memory; state=fresh(); state.memory=mem; save(); flushReport(); render(); toast('✓ היום נסגר — הסיכום נשלח למשרד');
+}
+async function flushReport(){ if(bot.status!=='active') return; var out=lsGet('gazgal-tech-outbox',[]), left=[];
+  for(var i=0;i<out.length;i++){ var it=out[i]; try{ var fd=new FormData(); fd.append('meta', JSON.stringify(it.meta)); fd.append('snap', it.snap);
+      var r=await botFetch('/api/report',{method:'POST', body:fd}); if(!r.ok) throw 0; }catch(e){ left=out.slice(i); break; } }
+  lsSet('gazgal-tech-outbox', left); }
+
+/* ================= screens ================= */
+function topbar(){
+  var d=done().length, n=state.jobs.length;
+  return '<header class="topbar"><div class="row"><span class="j">'+(state.source==='none'?'אין יומן טעון':'יומן '+esc(state.journal)+' · '+esc(dayOf()))+(state.tech?' · '+esc(state.tech):'')+'</span>'+
+    '<span class="j">'+(bot.status==='active'?'🛰 מחובר למשרד':'לא מחובר')+'</span></div>'+
+    '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עבודות</span><span class="j">'+(state.phase==='morning'?'לפני יציאה':'בעבודה')+'</span></div>'+
+    '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div></header>';
+}
+function pairCard(){ if(bot.status==='active') return '';
+  return '<section class="card"><h3 style="margin:0">🛰 חיבור למשרד</h3><p class="hint">פעם אחת. אחרי החיבור היומן מגיע מהמשרד לבד, והמשרד רואה איפה אתה ביום.</p><button class="btn btn-ghost btn-sm" type="button" data-sheet="pair">חבר את הטלפון</button></section>'; }
+function viewMorning(){
+  var out='<main>'+pairCard();
+  bot.journals.forEach(function(j){ out+='<button class="btn btn-accent" type="button" data-jr="'+esc(j.id)+'">📄 יומן מהמשרד מחכה — '+esc(j.name||'יומן')+' · טען</button>'; });
+  if(state.source==='none'){
+    return out+'<section class="card center"><h2 style="font-family:var(--display);font-weight:400">אין יומן טעון</h2><p class="muted" style="margin:0">טוענים את ״יומן עבודות לטכנאי״ (GG-645) מבש״ן, כ־PDF. הקובץ נקרא בטלפון.</p>'+
+      '<label class="filebtn big">📄 בחר את ה־PDF של היומן<input type="file" id="imp" accept="application/pdf,.pdf"></label></section>'+histCard()+'</main>';
+  }
+  var P=state.jobs, wins={}; P.forEach(function(j){ var k=j.from+'–'+j.to; wins[k]=(wins[k]||0)+1; });
+  out+='<section class="card"><span class="eyebrow">בוקר טוב'+(state.tech?', '+esc(state.tech.split(' ')[0]):'')+'</span><h2 style="font-family:var(--display);font-weight:400;font-size:26px">'+P.length+' עבודות · '+esc(state.date)+'</h2>'+
+    '<div class="muted">'+Object.keys(wins).map(function(k){ return esc(k)+' ('+wins[k]+')'; }).join(' · ')+'</div>'+
+    '<div class="muted">'+P.filter(function(j){ return j.inspection; }).length+' בדיקות תקניות · '+P.filter(function(j){ return j.officePrice; }).length+' עם מחיר מהמשרד</div>'+
+    '<button class="btn btn-accent" type="button" id="goRoute">🧭 סדר לפי חלונות הזמן ויוצאים</button>'+
+    '<label class="filebtn">📄 יומן אחר<input type="file" id="imp" accept="application/pdf,.pdf"></label></section>'+
+    '<section><div class="sec"><h3>העבודות ביומן</h3></div><div class="list">'+P.map(function(j,i){ return '<button type="button" class="li" data-sheet="peek" data-preset="'+esc(j.id)+'"><span class="n num">'+(i+1)+'</span><div><div class="t">'+esc(j.name)+'</div><div class="s">'+esc(j.city)+' · '+esc(j.from+'–'+j.to)+'</div></div><span class="tag t-info">'+esc(jobKind(j))+'</span></button>'; }).join('')+'</div></section></main>';
+  return out;
+}
+function jobKind(j){ var k=j.lines.map(function(l){ return CODES[l.code]; }).filter(Boolean); return k[0] || (j.lines[0]?j.lines[0].text.split(' ').slice(0,3).join(' '):'עבודה'); }
+function linesHtml(j){
+  return '<div class="lines">'+j.lines.map(function(l){ return '<div class="ln">'+(l.code?'<span class="code" title="קוד עבודה בבש״ן">'+esc(l.code)+'</span>':'<span></span>')+'<span>'+esc(l.text)+'</span>'+
+    (l.said||l.price?'<span class="pr num">'+money(l.said||l.price)+(l.unit?' <small>ליחידה</small>':'')+'</span>':'<span></span>')+'</div>'; }).join('')+'</div>';
+}
+function contactsList(j){ var out=[], seen={};
+  function add(label,num){ var k=String(num).replace(/\D/g,''); if(!k||seen[k]) return; seen[k]=1; out.push({label:label, num:num}); }
+  j.contacts.forEach(function(c){ add(c.name||'איש קשר', c.phone); }); j.phones.forEach(function(p,i){ add('טלפון '+(i+1)+' בכרטיס', p); }); return out; }
+function viewRoute(){
+  var c=cur(), P=pending(), D=done(), E=etas(), out='<main>'+pairCard();
+  if(!c) out+='<section class="card center"><h2 style="font-family:var(--display);font-weight:400">כל העבודות טופלו</h2><button class="btn btn-accent" type="button" data-view="end">לסיכום היום</button></section>';
+  else { var e=E[c.id]||{}, cts=contactsList(c), mob=cts.filter(function(x){ return /^05/.test(x.num); })[0];
+    out+='<section class="card next"><span class="eyebrow">העבודה הבאה · '+(D.length+1)+' מתוך '+state.jobs.length+' · הזמנה '+esc(c.id)+'</span>'+
+      '<div class="name">'+esc(c.name)+'</div>'+
+      '<div class="custline num">'+(custNo(c)?'צרכן <b>'+esc(custNo(c))+'</b>':'לקוח מזדמן')+' · '+(c.type==='צר'?'גז מרכזי'+(c.central?' · מרכזייה '+esc(c.central):'')+(c.meter?' · מונה '+esc(c.meter):''):'בלונים')+'</div>'+
+      '<div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+'</span></div>'+
+      '<div><span class="win'+(e.late?' late':'')+'">🕘 '+esc(c.from)+'–'+esc(c.to)+'</span>'+(e.eta!=null?' <span class="muted">· הגעה משוערת '+hm(e.eta)+(e.late?' — <b style="color:var(--bad)">אחרי החלון, להתקשר ללקוח</b>':'')+'</span>':'')+'</div>'+
+      '<div class="cols"><h4>מה המשרד כתב (תקלה)</h4>'+linesHtml(c)+'</div>'+
+      (c.officePrice?'<div class="collect c-collect"><span>המשרד אמר ללקוח</span><span class="big num">'+money(c.officePrice)+'</span></div>':'<div class="collect c-verify"><span>אין מחיר מהמשרד<small>המחיר נקבע בשטח</small></span></div>')+
+      (c.needs.length?'<div class="note">🧰 לקחת: '+esc(c.needs.join(' · '))+'</div>':'')+
+      (c.form?'<div class="okbox">📋 טופס '+esc(c.form)+' — בדיקה תקופתית'+(c.type==='צר'?' (גז מרכזי)':' (בלונים)')+'</div>':'')+
+      '<div class="acts"><a class="act waze" data-go="'+esc(c.id)+'" href="https://waze.com/ul?q='+encodeURIComponent((c.street+' '+(c.house||'')+', '+c.city).trim())+'&navigate=yes" target="_blank" rel="noopener"><b>🧭</b>Waze</a>'+
+        '<button class="act" type="button" data-sheet="call" data-preset="'+esc(c.id)+'"><b>📞</b>חיוג ('+cts.length+')</button>'+
+        (mob?'<a class="act" data-go="'+esc(c.id)+'" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent('שלום, כאן '+((state.tech||'הטכנאי').split(' ')[0])+', הטכנאי מגז גל. אני בדרך אליכם, אגיע בעוד כ־20 דקות.')+'" target="_blank" rel="noopener"><b>💬</b>בדרך אליך</a>':'<span class="act muted"><b>💬</b>אין נייד</span>')+'</div>'+
+      (c.startedAt?'<p class="hint">התחלת ב־'+hhmm(c.startedAt)+'</p>':'<button class="btn btn-ghost btn-sm" type="button" data-start="'+esc(c.id)+'">▶ הגעתי — מתחיל עבודה</button>')+
+      '<div class="go"><button class="btn btn-ok" type="button" data-sheet="done">✓ בוצע</button><button class="btn btn-bad" type="button" data-sheet="postpone">⏸ נדחה</button></div>'+
+      '<button class="btn btn-ghost btn-sm" type="button" data-sheet="reassign">↩ מעבר ליכולתי — לשיבוץ מחדש</button></section>';
+  }
+  if(P.length>1) out+='<section><div class="sec"><h3>הבאות בתור · <span class="muted num">'+(P.length-1)+'</span></h3></div><div class="list">'+P.slice(1).map(function(j,i){ var e2=E[j.id]||{};
+    return '<div class="li li-q"><span class="n num">'+(D.length+i+2)+'</span><button class="li-main" type="button" data-sheet="peek" data-preset="'+esc(j.id)+'"><div class="t">'+esc(j.name)+'</div><div class="s">'+esc(j.city)+' · '+esc(jobKind(j))+'</div>'+
+      '<div style="margin-top:4px"><span class="tag '+(e2.late?'t-bad':'t-info')+' num">🕘 '+esc(j.from+'–'+j.to)+(e2.eta!=null?' · ~'+hm(e2.eta):'')+(e2.late?' ⚠':'')+'</span></div></button>'+
+      '<div class="ctl"><button class="ic" type="button" data-first="'+esc(j.id)+'" aria-label="עבור עכשיו ל'+esc(j.name)+'">⤒</button></div></div>'; }).join('')+'</div></section>';
+  if(D.length) out+='<section><div class="sec"><h3>טופלו · <span class="muted num">'+D.length+'</span></h3></div><div class="list">'+D.slice().reverse().map(function(j){ var r=j.result||{};
+    return '<div class="li done-li"><span class="n">'+(j.status==='done'?'✓':j.status==='postponed'?'⏸':'↩')+'</span><div><div class="t">'+esc(j.name)+'</div><div style="margin-top:4px">'+
+      (j.status==='done'?'<span class="tag t-ok">בוצע'+(r.pay && r.pay.amount?' · '+esc(PAY[r.pay.method])+' '+money(r.pay.amount):'')+'</span>':j.status==='postponed'?'<span class="tag t-warn">נדחה · '+esc(r.reason||'')+(r.newDate?' · '+esc(r.newDate):'')+'</span>':'<span class="tag t-bad">לשיבוץ מחדש</span>')+'</div></div>'+
+      '<div class="ctl"><button class="ic" type="button" data-reopen="'+esc(j.id)+'" aria-label="פתח מחדש">↺</button></div></div>'; }).join('')+'</div></section>';
+  return out+'</main>';
+}
+function histCard(){ var H=lsGet('gazgal-tech-history',[]); if(!H.length) return '';
+  return '<section class="card"><h3 style="margin:0">📚 ימים קודמים</h3>'+H.slice(0,10).map(function(h){ return '<details class="amg"><summary>'+esc(h.date)+' · יומן '+esc(h.journal)+'</summary><div class="msg" style="font-size:14px">'+esc(h.text)+'</div></details>'; }).join('')+'</section>'; }
+function viewEnd(){
+  var R=reportText(), op=pending().length;
+  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>יומן '+esc(state.journal)+'</h1></div>'+
+    '<section class="card"><div class="grid2"><div class="kpi"><span class="v num">'+state.jobs.filter(function(j){ return j.status==='done'; }).length+'</span><span class="k">בוצעו</span></div>'+
+    '<div class="kpi"><span class="v num">'+state.jobs.filter(function(j){ return j.status==='postponed'; }).length+'</span><span class="k">נדחו</span></div>'+
+    '<div class="kpi"><span class="v num">'+money(R.t.cash)+'</span><span class="k">מזומן</span></div><div class="kpi"><span class="v num">'+money(R.t.cheque)+'</span><span class="k">צ׳קים · '+R.t.nq+'</span></div></div>'+
+    (op?'<div class="note">'+op+' עבודות לא טופלו — הן יופיעו בסיכום כ״לא טופל״.</div>':'')+
+    '<div class="msg" style="font-size:14px">'+esc(R.text)+'</div>'+
+    '<a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(R.text)+'" target="_blank" rel="noopener">💬 הסיכום בוואטסאפ למשרד</a>'+
+    '<button class="btn btn-ok" type="button" id="closeDay">🔒 סגור יום ושלח למשרד</button></section>'+histCard()+'</main>';
+}
+function navbar(){ var v=state.phase==='morning'?'route':state.view;
+  function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
+  return '<nav class="nav" aria-label="ניווט"><div class="in" style="grid-template-columns:repeat(2,1fr)">'+tab('route','🔧','עבודות')+tab('end','📋','סוף יום')+'</div></nav>'; }
+function render(){ var body = state.phase==='morning' ? viewMorning() : state.view==='end' ? viewEnd() : viewRoute();
+  document.getElementById('app').innerHTML=topbar()+body+navbar(); }
+
+/* ================= sheets ================= */
+function openSheet(kind,preset){
+  var c=(preset && byId(preset)) || cur(), html='';
+  if(kind==='pair') html='<h2>🛰 חיבור למשרד</h2><p class="hint">נדיר מקליד כאן את קוד המנהל, פעם אחת לטלפון.</p>'+
+    '<div class="field"><label for="admTech">הטכנאי</label><select class="inp" id="admTech"><option value="kasem">קסם</option><option value="avraham">אברהם</option><option value="nadir">נדיר</option><option value="yoram">יורם</option></select></div>'+
+    '<div class="field"><label for="admCode">קוד מנהל</label><input class="inp" id="admCode" type="password" autocomplete="off"></div>'+
+    '<button class="btn btn-accent" type="button" id="doPair">חבר</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  if(kind==='peek') html='<h2>'+esc(c.name)+'</h2><div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+'</span></div><div><span class="win">🕘 '+esc(c.from+'–'+c.to)+'</span></div>'+linesHtml(c)+
+    (c.status==='pending'&&state.phase==='route'?'<button class="btn btn-accent btn-sm" type="button" data-first="'+esc(c.id)+'">⤒ עבור עכשיו</button>':'')+'<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  if(kind==='call') html='<h2>חיוג — '+esc(c.name)+'</h2><div class="list">'+contactsList(c).map(function(x){ return '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+x.num.replace(/\D/g,'')+'"><span class="n">📞</span><div><div class="t num">'+esc(x.num)+'</div><div class="s">'+esc(x.label)+'</div></div><span></span></a>'; }).join('')+
+    '<a class="li" style="text-decoration:none;color:inherit" href="tel:'+OFFICE_TEL+'"><span class="n">🏢</span><div><div class="t">המשרד</div></div><span></span></a></div><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  if(kind==='done'){
+    draft={job:c.id, exec:[], method:c.prepaid?'prepaid':c.free?'none':null, follow:false};
+    html='<h2>✓ בוצע — '+esc(c.name)+'</h2>'+
+      '<div class="cols"><h4>מה המשרד כתב</h4>'+linesHtml(c)+'</div>'+
+      '<div class="field"><span class="lbl">מה עשית (ביצוע) — מהמחירון או חופשי</span><div id="execBox"></div>'+
+        '<select class="inp" id="plPick"><option value="">+ הוסף עבודה מהמחירון…</option>'+PRICES.map(function(p,i){ return '<option value="'+i+'">'+esc(p[0])+' — '+money(p[1])+'</option>'; }).join('')+'</select>'+
+        '<div class="grid2"><input class="inp" id="exText" placeholder="עבודה אחרת — תיאור" autocomplete="off"><input class="inp num" id="exPrice" placeholder="₪ (לא חובה)" inputmode="decimal" autocomplete="off"></div>'+
+        '<button class="btn btn-ghost btn-sm" type="button" id="exAdd">+ הוסף שורת ביצוע</button></div>'+
+      '<div class="sum"><span>סה״כ לגבייה</span><input class="inp num" id="tot" inputmode="decimal" style="max-width:140px;font-size:22px;font-weight:800" value="'+(c.officePrice||'')+'"></div>'+
+      (c.officePrice?'<p class="hint">המשרד אמר ללקוח '+money(c.officePrice)+'. שינוי מחייב נימוק.</p><div class="field" id="whyBox" hidden><label for="why" class="lbl">למה המחיר שונה (חובה)</label><input class="inp" id="why" autocomplete="off" placeholder="למשל: נדרש 4 מ׳ צינור נוסף"></div>':'<p class="hint">אין מחיר מהמשרד — המחיר שלך.</p>')+
+      (c.prepaid?'<div class="okbox">ביומן כתוב ״שולם מראש״ — לא גובים.</div>':'')+(c.free?'<div class="okbox">ביומן כתוב ״ללא עלות״.</div>':'')+
+      '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+['cash','cheque','office','later','prepaid','unpaid','none'].map(function(k){ return '<button type="button" class="chip" data-pay="'+k+'" aria-pressed="'+(draft.method===k)+'">'+PAY[k]+'</button>'; }).join('')+'</div>'+
+        '<div id="chq" hidden class="grid2"><input class="inp num" id="chqNo" placeholder="מספר צ׳ק" inputmode="numeric"><input class="inp num" id="chqDue" type="date"></div></div>'+
+      '<div class="field"><label for="note">הערה למשרד (לא חובה)</label><textarea class="inp" id="note" placeholder="מה שהיית כותב בתעודה"></textarea></div>'+
+      '<div class="field"><span class="lbl">תמונה (לא חובה)</span>'+photoPick('ph','צלם')+'</div>'+
+      '<div class="field"><div class="chips"><button type="button" class="chip" data-follow="1" aria-pressed="false">➕ צריך הזמנת המשך</button></div><input class="inp" id="follow" hidden placeholder="מה נשאר לעשות — למשל: להחליף רמפה בחוץ"></div>'+
+      (c.form?'<div class="note">📋 טופס '+esc(c.form)+': בינתיים ממלאים בפנקס ומצלמים כאן. הטופס הדיגיטלי — בשלב הבא.</div>':'')+
+      '<p class="err" id="dErr" hidden></p><button class="btn btn-ok" type="button" id="confirmDone">אישור — בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+  }
+  if(kind==='postpone'){ draft={job:c.id, reason:null};
+    html='<h2>⏸ נדחה — '+esc(c.name)+'</h2><p class="hint">העבודה לא בוצעה. היא חוזרת למשרד עם הסיבה — לא נסגרת כ״בוצעה״.</p>'+
+      '<div class="field"><span class="lbl">למה?</span><div class="chips">'+POSTPONE.map(function(r){ return '<button type="button" class="chip" data-reason="'+r+'" aria-pressed="false">'+r+'</button>'; }).join('')+'</div></div>'+
+      '<div class="field"><label for="newDate" class="lbl">מועד חדש (אם תואם עם הלקוח)</label><input class="inp" id="newDate" type="date"><p class="hint">ריק = המשרד יתאם.</p></div>'+
+      '<div class="field"><label for="pNote">פירוט</label><textarea class="inp" id="pNote" placeholder="חובה ב״אחר״"></textarea></div>'+
+      '<p class="err" id="pErr" hidden></p><button class="btn btn-bad" type="button" id="confirmPost">סמן כנדחה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>'; }
+  if(kind==='reassign'){ draft={job:c.id, level:null};
+    html='<h2>↩ לשיבוץ מחדש — '+esc(c.name)+'</h2><p class="hint">העבודה דורשת טכנאי אחר או רמה אחרת. היא חוזרת למשרד עם הסיבה, והמשרד משבץ.</p>'+
+      '<div class="field"><label for="rWhy">מה נדרש ולמה</label><textarea class="inp" id="rWhy" placeholder="למשל: נדרש תכנון לצובר — רמה 2"></textarea></div>'+
+      '<div class="field"><span class="lbl">רמה נדרשת</span><div class="chips">'+['1','2'].map(function(l){ return '<button type="button" class="chip" data-level="'+l+'" aria-pressed="false">רמה '+l+'</button>'; }).join('')+'<button type="button" class="chip" data-level="" aria-pressed="false">לא יודע</button></div></div>'+
+      '<p class="err" id="rErr" hidden></p><button class="btn btn-bad" type="button" id="confirmRe">החזר למשרד</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>'; }
+  document.getElementById('sheetRoot').innerHTML='<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>'+html+'</div></div>';
+  if(kind==='done') drawExec();
+}
+function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; }
+function showErr(id,m){ var e=document.getElementById(id); e.hidden=false; e.textContent=m; }
+function press(sel,t){ document.querySelectorAll(sel).forEach(function(b){ b.setAttribute('aria-pressed', b===t?'true':'false'); }); }
+function after(msg){ save(); closeSheet(); render(); window.scrollTo(0,0); if(msg) toast(msg); }
+function drawExec(){ var b=document.getElementById('execBox'); if(!b||!draft) return;
+  b.innerHTML=draft.exec.length ? '<div class="lines">'+draft.exec.map(function(x,i){ return '<div class="ln exe"><span class="code">ביצוע</span><span>'+esc(x.text)+'</span><span class="pr num">'+(x.price?money(x.price):'')+' <button class="linkish" type="button" data-exdel="'+i+'" style="min-height:0;padding:0 6px">✕</button></span></div>'; }).join('')+'</div>' : '<p class="hint">עוד לא נוספה שורת ביצוע.</p>';
+  var c=byId(draft.job), sum=draft.exec.reduce(function(t,x){ return t+(x.price||0); },0), tot=document.getElementById('tot');
+  if(tot && !tot.dataset.touched && sum && !(c && c.officePrice)) tot.value=sum;
+}
+function confirmDone(){
+  var c=byId(draft.job), g=function(id){ return ((document.getElementById(id)||{}).value||'').trim(); };
+  var tot=parseFloat(g('tot').replace(',','.')), note=g('note'), why=g('why');
+  if(!draft.exec.length && !note){ showErr('dErr','כתוב מה עשית — שורת ביצוע מהמחירון, עבודה אחרת או הערה.'); return; }
+  if(!draft.method){ showErr('dErr','בחר תשלום (או ״ללא חיוב״).'); return; }
+  if(['cash','cheque','office','later'].indexOf(draft.method)>=0 && !(tot>0)){ showErr('dErr','כתוב את הסכום לגבייה.'); return; }
+  var changed = c.officePrice && tot>0 && Math.abs(tot-c.officePrice)>0.009;
+  if(changed && !why){ showErr('dErr','המחיר שונה ממה שהמשרד אמר ('+money(c.officePrice)+') — כתוב למה.'); return; }
+  if(draft.follow && !g('follow')){ showErr('dErr','כתוב מה נשאר לעשות בהזמנת ההמשך.'); return; }
+  var pay={method:draft.method, amount:(draft.method==='none'||draft.method==='prepaid'||draft.method==='unpaid'&&!(tot>0))?0:(Math.round(tot*100)/100||0)};
+  if(draft.method==='cheque'){ pay.no=g('chqNo'); pay.due=g('chqDue'); }
+  if(!state.firstAt){ state.firstAt=Date.now(); state.day=todayStr(); }
+  c.status='done'; c.result={at:Date.now(), start:c.startedAt||null, exec:draft.exec, pay:pay, note:note, changed:!!changed, why:why, office:c.officePrice||null, follow:draft.follow?g('follow'):''};
+  if(draft.ph){ photos['p-'+c.id]=draft.ph; savePhotos(); c.result.photo=true; }
+  after('✓ '+c.name+(pay.amount?' · '+PAY[pay.method]+' '+money(pay.amount):''));
+}
+
+/* ================= events ================= */
+document.addEventListener('click',function(ev){
+  var t=ev.target.closest('button,a,[data-scrim]'); if(!t) return;
+  if(t.hasAttribute('data-scrim')){ if(ev.target===t) closeSheet(); return; }
+  if(t.hasAttribute('data-close')){ closeSheet(); return; }
+  var ds=t.dataset;
+  if(ds.go){ var gj=byId(ds.go); if(gj){ gj.leftAt=Date.now(); save(); } }
+  if(ds.view){ if(state.phase==='morning' && ds.view!=='route'){ toast('קודם מסדרים ויוצאים'); return; } state.view=ds.view; save(); render(); window.scrollTo(0,0); return; }
+  if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
+  if(t.id==='doPair'){ pair(); return; }
+  if(ds.jr){ loadOfficeJournal(ds.jr); return; }
+  if(t.id==='goRoute'){ orderByWindows(); return; }
+  if(ds.start){ var sj=byId(ds.start); if(sj){ sj.startedAt=Date.now(); save(); render(); } return; }
+  if(ds.first){ var fj=byId(ds.first), c=cur(); if(fj && c && fj!==c){ var A=state.jobs; A.splice(A.indexOf(fj),1); A.splice(A.indexOf(c),0,fj); save(); closeSheet(); render(); window.scrollTo(0,0);
+      var E=etas(), late=pending().filter(function(j){ return E[j.id] && E[j.id].late; }); toast(fj.name+' — העבודה הבאה'+(late.length?' · ⚠ '+late.length+' עבודות יגיעו אחרי החלון':'')); } return; }
+  if(ds.reopen){ var rj=byId(ds.reopen); if(rj){ rj.status='pending'; rj.result=null; var A2=state.jobs; A2.splice(A2.indexOf(rj),1); var c2=cur(); A2.splice(c2?A2.indexOf(c2):A2.length,0,rj); save(); render(); toast('נפתח מחדש: '+rj.name); } return; }
+  if(t.id==='exAdd'){ var tx=(document.getElementById('exText').value||'').trim(), pr=parseFloat((document.getElementById('exPrice').value||'').replace(',','.'));
+    if(!tx){ toast('כתוב מה עשית'); return; } draft.exec.push({text:tx, price:pr>0?pr:null}); document.getElementById('exText').value=''; document.getElementById('exPrice').value=''; drawExec(); return; }
+  if(ds.exdel){ draft.exec.splice(+ds.exdel,1); drawExec(); return; }
+  if(ds.pay){ draft.method=ds.pay; press('[data-pay]',t); document.getElementById('chq').hidden=ds.pay!=='cheque'; return; }
+  if(ds.follow){ draft.follow=!draft.follow; t.setAttribute('aria-pressed', draft.follow?'true':'false'); document.getElementById('follow').hidden=!draft.follow; return; }
+  if(t.id==='confirmDone'){ confirmDone(); return; }
+  if(ds.reason){ draft.reason=ds.reason; press('[data-reason]',t); return; }
+  if(t.id==='confirmPost'){ var pj=byId(draft.job), pn=(document.getElementById('pNote').value||'').trim(), nd=document.getElementById('newDate').value;
+    if(!draft.reason){ showErr('pErr','בחר סיבה.'); return; } if(draft.reason==='אחר' && !pn){ showErr('pErr','ב״אחר״ צריך פירוט.'); return; }
+    if(!state.firstAt){ state.firstAt=Date.now(); state.day=todayStr(); }
+    pj.status='postponed'; pj.result={at:Date.now(), reason:draft.reason, note:pn, newDate:nd?nd.split('-').reverse().join('/'):''}; after('⏸ '+pj.name+' — נדחה'); return; }
+  if(ds.level!==undefined){ draft.level=ds.level; press('[data-level]',t); return; }
+  if(t.id==='confirmRe'){ var rr=byId(draft.job), w=(document.getElementById('rWhy').value||'').trim();
+    if(!w){ showErr('rErr','כתוב מה נדרש.'); return; }
+    if(!state.firstAt){ state.firstAt=Date.now(); state.day=todayStr(); }
+    rr.status='reassign'; rr.result={at:Date.now(), reason:w, level:draft.level||''}; after('↩ '+rr.name+' — חזר למשרד'); return; }
+  if(t.id==='closeDay'){ if(!confirm('לסגור את היום ולשלוח את הסיכום למשרד?')) return; closeDay(); return; }
+});
+document.addEventListener('input',function(ev){ var t=ev.target; if(!draft) return;
+  if(t.id==='tot'){ t.dataset.touched='1'; var c=byId(draft.job), v=parseFloat(t.value.replace(',','.')), wb=document.getElementById('whyBox'); if(wb) wb.hidden=!(c.officePrice && v>0 && Math.abs(v-c.officePrice)>0.009); } });
+document.addEventListener('change',function(ev){ var t=ev.target;
+  if(t.id==='imp'){ var f=t.files && t.files[0]; t.value=''; if(f) importPdf(f); return; }
+  if(t.id==='plPick' && t.value!==''){ var p=PRICES[+t.value]; draft.exec.push({text:p[0], price:p[1]}); t.value=''; drawExec(); return; }
+  if(t.dataset && t.dataset.photo){ var k=t.dataset.photo; readPhoto(t.files[0],function(u){ if(!draft) return; draft[k]=u; var pv=document.getElementById(k+'Prev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="התמונה">'; }); }
+});
+
+render();
+poll(); setInterval(poll, 60000); setInterval(function(){ if(state.phase==='route' && !document.hidden) sendLive(); }, 180000);
+if('serviceWorker' in navigator && location.protocol==='https:') window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
+if(location.hostname==='localhost') window.__tech={parse:parseTechJournal, items:pdfItems, state:function(){ return state; }};
+})();
+</script>
+
+</html>
