@@ -264,8 +264,8 @@ var OFFICE_TEL = '0542222968';
 var PAY = {cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המשרד', later:'ישלם למשרד', prepaid:'שולם מראש', unpaid:'לא שולם'};
 var PAY_FOR = ['קומפלט','מיכל זר','חוב קודם','אחר'];   /* office feedback מ2: what the money was for */
 var COMPANY = 'גז גל ואנונו בע״מ', COMPANY_ID = '513040790';   /* FEEDBACK #48: the delivery note's header */
-var POINTS = {me:'נדיר', eyal:'אייל', ramp:'רמפה'};
-var POINT_BTN = {me:'המשאית שלי', eyal:'משאית אייל', ramp:'רמפה', other:'אחר'};
+var POINTS = {me:'נדיר', eyal:'אייל', truck3:'משאית שניה', ramp:'רמפה'};
+var POINT_BTN = {me:'המשאית שלי', eyal:'משאית אייל', truck3:'משאית שניה', ramp:'רמפה', other:'אחר'};
 var MOMENTS = ['כניסה','יציאה','יציאה למתקן','סוף יום'];
 var CF = [ {k:'gm',l:'גמ',d:'גדול מלא'}, {k:'km',l:'קמ',d:'קטן מלא'}, {k:'gr',l:'גר',d:'גדול ריק'}, {k:'kr',l:'קר',d:'קטן ריק'} ];
 var AF = [ {k:'a5m',kg:'5',s:'מלא'}, {k:'a5r',kg:'5',s:'ריק'}, {k:'a25m',kg:'2.5',s:'מלא'}, {k:'a25r',kg:'2.5',s:'ריק'} ];
@@ -499,6 +499,138 @@ function moveWords(m){
     if(e<0) L.push('פורקו '+(-e)+'×'+kg[s]+' ריקים'); if(e>0) L.push('נוספו '+e+'×'+kg[s]+' ריקים'); });
   return L.join(' · ');
 }
+/* ---------- FEEDBACK #53: the morning counts Eyal sends in WhatsApp, pasted in one go ----------
+   Every morning Eyal counts the ramp and the trucks at the Ofakim warehouse and sends each count to the drivers' group,
+   in the same format the app writes ("רמפה כניסה" / "44 גמ" / "76 ק״מ" / "5 ק״ג 8 מלא"). Copying all of them from
+   WhatsApp and pasting here reads every message, files it by point and moment, keeps the history (phone + server) and
+   compares each count with the point's last count before today — the ramp should not change overnight — and with the
+   same count the day before. The app's own counts go into the same history. */
+var COUNT_KEY={'גמ':'gm','קמ':'km','גר':'gr','קר':'kr'}, POINT_OF={'רמפה':'ramp','אייל':'eyal','נדיר':'me','משאית שניה':'truck3','משאית שנייה':'truck3','משאית 2':'truck3'};
+var AMG_LBL={a5m:'אמגזית 5 מלא', a5r:'אמגזית 5 ריק', a25m:'אמגזית 2.5 מלא', a25r:'אמגזית 2.5 ריק'};
+function countLog(){ return lsGet('gazgal-countlog',[]); }
+function putCountLog(items){
+  var L=countLog(), have={}, n=0; L.forEach(function(x){ have[x.id]=1; });
+  items.forEach(function(x){ if(have[x.id]) return; have[x.id]=1; L.push(x); n++; });
+  var cut=Date.now()-120*864e5; L=L.filter(function(x){ return (x.at||0)>cut; }).sort(function(a,b){ return a.at-b.at; }).slice(-2000);
+  lsSet('gazgal-countlog', L);
+  if(n){ var d=lsGet('gazgal-countlog-dirty',[]); items.forEach(function(x){ if(d.indexOf(x.id)<0) d.push(x.id); }); lsSet('gazgal-countlog-dirty', d); syncCountLog(); }
+  return n;
+}
+function normDay(s){ var m=/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/.exec(s||''); if(!m) return ''; return ('0'+m[1]).slice(-2)+'/'+('0'+m[2]).slice(-2)+'/'+(m[3].length===2?'20'+m[3]:m[3]); }
+function atOf(day,time){ var d=/^(\d\d)\/(\d\d)\/(\d{4})$/.exec(day), t=/(\d{1,2}):(\d\d)/.exec(time||'');
+  return d ? new Date(+d[3], +d[2]-1, +d[1], t?+t[1]:12, t?+t[2]:0).getTime() : Date.now(); }
+function countId(c){ return 'K'+c.day.replace(/\D/g,'')+'-'+c.point+(c.pointText||'')+'-'+c.moment+'-'+(c.time||Object.keys(c.v).map(function(k){ return k+c.v[k]; }).join('')); }
+function parseCounts(txt){
+  var head=/^\[([^\]]+)\]\s*([^:]{1,40}):\s*(.*)$/, msgs=[], cur=null;   /* "[5:57, 4.10.2026] אייל נהג תקומה: רמפה כניסה" */
+  String(txt||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').split(/\r?\n/).forEach(function(l){ var m=head.exec(l.trim());
+    if(m){ cur={when:m[1], by:m[2].trim(), lines:[m[3]]}; msgs.push(cur); } else { if(!cur){ cur={when:'', by:'', lines:[]}; msgs.push(cur); } cur.lines.push(l); } });
+  var counts=[], notes=[], skipped=[];
+  msgs.forEach(function(msg){
+    var time=(/(\d{1,2}:\d\d)/.exec(msg.when)||[])[1]||'', day=normDay(msg.when)||todayStr(), c=null;
+    msg.lines.forEach(function(raw){ var l=raw.trim(); if(!l) return;
+      var n=l.replace(/[״"'׳`]/g,'').replace(/\s+/g,' ');
+      var hm=/^(.+?) (יציאה למתקן|כניסה|יציאה|סוף יום)$/.exec(n);
+      if(hm){ var who=hm[1].replace(/\(.*?\)/g,'').trim();
+        c={day:day, time:time, by:msg.by, point:POINT_OF[who]||'other', pointText:POINT_OF[who]?'':who, moment:hm[2], plate:(/(\d{5,})/.exec(hm[1])||[])[1]||'', v:{}};
+        counts.push(c); return; }
+      var nc=/^(.+?) ללא שינוי$/.exec(n);
+      if(nc && POINT_OF[nc[1].trim()]){ c=null; counts.push({day:day, time:time, by:msg.by, point:POINT_OF[nc[1].trim()], pointText:'', moment:'כניסה', plate:'', v:{}, same:true}); return; }
+      var vm=/^(\d{1,4}) ?(גמ|קמ|גר|קר)$/.exec(n);
+      if(vm && c){ c.v[COUNT_KEY[vm[2]]]=+vm[1]; return; }
+      var am=/^(5|2\.5) ?קג (\d{1,4}) (מלא|ריק)$/.exec(n);
+      if(am && c){ c.v[(am[1]==='5'?'a5':'a25')+(am[3]==='מלא'?'m':'r')]=+am[2]; return; }
+      if(n==='אמגזיות') return;
+      if(/\d/.test(n) && c && c.day===day && !/[א-ת]{3,}.*[א-ת]{3,}/.test(n)){ skipped.push(l); return; }
+      notes.push({day:day, time:time, by:msg.by, text:l}); });
+  });
+  counts.forEach(function(c){ c.kind='count'; c.src='wa'; c.at=atOf(c.day,c.time); });
+  counts.forEach(function(c){ if(!c.same) return; var last=cBefore(c, countLog().concat(counts)).filter(function(x){ return !x.same || Object.keys(x.v).length; }).pop();
+    if(last){ c.v=JSON.parse(JSON.stringify(last.v)); c.sameAs=last.day+' '+last.moment+(last.time?' '+last.time:''); } });
+  counts=counts.filter(function(c){ return c.same || Object.keys(c.v).length; });
+  counts.forEach(function(c){ c.id=countId(c)+(c.same?'-same':''); });
+  notes.forEach(function(x){ x.kind='note'; x.src='wa'; x.at=atOf(x.day,x.time); x.id='N'+x.day.replace(/\D/g,'')+'-'+(x.time||'')+'-'+x.text.slice(0,30); });
+  return {counts:counts, notes:notes, skipped:skipped};
+}
+function cName(c){ return (c.point==='other' ? (c.pointText||'נקודה') : POINTS[c.point])+(c.plate?' ('+c.plate+')':'')+' '+c.moment; }
+function cVals(v){ var L=[]; CF.forEach(function(f){ if(v[f.k]) L.push(v[f.k]+' '+f.l); }); Object.keys(AMG_LBL).forEach(function(k){ if(v[k]) L.push(AMG_LBL[k]+' '+v[k]); }); return L.join(' · ')||'הכל 0'; }
+/* the four main kinds: a missing line is 0. Amgaz: compared only when both counts have them (often not counted at all) */
+function hasAmg(v){ return Object.keys(AMG_LBL).some(function(k){ return v[k]!=null; }); }
+function cDiff(a,b){ var L=[], amg=hasAmg(a)&&hasAmg(b); CF.map(function(f){ return [f.k,f.l]; }).concat(amg?Object.keys(AMG_LBL).map(function(k){ return [k,AMG_LBL[k]]; }):[]).forEach(function(p){
+  var d=(b[p[0]]||0)-(a[p[0]]||0); if(d) L.push(p[1]+' '+(d>0?'+':'−')+Math.abs(d)); }); return L.join(' · '); }
+function cBefore(c,L){ return (L||countLog()).filter(function(x){ return x.kind==='count' && x.point===c.point && (x.pointText||'')===(c.pointText||'') && x.day!==c.day && x.at<c.at; }); }
+function cCompareHtml(c,L){
+  var b=cBefore(c,L), last=b[b.length-1], same=b.filter(function(x){ return x.moment===c.moment; }).pop(), out='';
+  if(last){ var d=cDiff(last.v,c.v), warn=d && c.moment==='כניסה' && c.point==='ramp';
+    out+='<div style="font-size:13px;'+(warn?'color:var(--bad);font-weight:800':'')+'">'+(d?(warn?'⚠ ':'')+'מאז ':'✓ כמו ')+'הספירה האחרונה ('+esc(last.day.slice(0,5)+' '+last.moment+(last.time?' '+last.time:''))+')'+(d?': '+esc(d):'')+'</div>'; }
+  if(same && same!==last){ var d2=cDiff(same.v,c.v); out+='<div class="muted" style="font-size:13px">לעומת '+esc(c.moment)+' ב־'+esc(same.day.slice(0,5))+': '+esc(d2||'אותו דבר')+'</div>'; }
+  if(!last) out+='<div class="muted" style="font-size:13px">אין ספירה קודמת של הנקודה הזאת.</div>';
+  return out;
+}
+function cRow(c,L){ return '<div style="border-bottom:1px solid var(--line);padding:6px 0"><div><b>'+esc(cName(c))+(c.same?' — ללא שינוי':'')+'</b> <span class="muted num" style="font-size:13px">'+esc((c.time||'')+(c.by?' · '+c.by:''))+'</span></div>'+
+  (c.same && !Object.keys(c.v).length ? '<div class="note" style="font-size:13px">אין ספירה קודמת של המשאית הזאת באפליקציה, אז לא ידוע מה עליה. ספרו אותה פעם אחת (״+ ספירה חדשה״ ← ״משאית שניה״), ומשם זה יעבוד לבד.</div>'
+    : '<div class="num" style="font-size:14px">'+esc(cVals(c.v))+(c.same && c.sameAs?' <span class="muted" style="font-size:12px">(כמו '+esc(c.sameAs)+')</span>':'')+'</div>'+(c.same?'':cCompareHtml(c,L)))+'</div>'; }
+/* the Ofakim morning balance: everything counted coming in (ramp + trucks) against everything counted going out.
+   Only Eyal's warehouse counts (pasted from WhatsApp) — not the driver's own counts at the facility. A point counted
+   only coming in, or only going out, is what makes a gap — then the gap is what was on it. */
+function ofakimBalance(day,L){
+  var C=L.filter(function(x){ return x.kind==='count' && x.src==='wa' && x.day===day; }), ins={}, outs={};
+  C.forEach(function(x){ var k=x.point+(x.pointText||''); if(x.moment==='כניסה') ins[k]=x; else if(x.moment==='יציאה'||x.moment==='יציאה למתקן') outs[k]=x; });
+  var ik=Object.keys(ins), ok=Object.keys(outs); if(ik.length<2 || ok.length<2) return '';
+  if(ik.some(function(k){ return ins[k].same && !Object.keys(ins[k].v).length; })) return '<div class="note" style="font-size:13px">⚖ בדיקת האיזון באופקים תעבוד אחרי שתהיה ספירה אחת של המשאית השנייה.</div>';
+  /* a truck that did not change (counted only coming in, "ללא שינוי") left with the same — both sides */
+  ik.forEach(function(k){ if(ins[k].same && !outs[k]) outs[k]=ins[k]; });
+  /* a truck counted only going out ("נדיר יציאה למתקן") came in with what it had at its last count before today (e.g. the driver's end-of-day count) */
+  var fromLast=[]; ok.forEach(function(k){ if(ins[k]) return; var last=cBefore(outs[k], L).pop(); if(last){ ins[k]=last; fromLast.push(cName(outs[k]).replace(/ (יציאה למתקן|יציאה)$/,'')+' ← '+last.day.slice(0,5)+' '+last.moment+(last.time?' '+last.time:'')); } });
+  var sum=function(o){ var t={gm:0,km:0,gr:0,kr:0}; Object.keys(o).forEach(function(k){ CF.forEach(function(f){ t[f.k]+=o[k].v[f.k]||0; }); }); return t; };
+  var a=sum(ins), b=sum(outs), d=cDiff(a,b), lone=ik.filter(function(k){ return !outs[k]; }).map(function(k){ return cName(ins[k]); }).concat(ok.filter(function(k){ return !ins[k]; }).map(function(k){ return cName(outs[k]); }));
+  var tot=function(t){ return CF.map(function(f){ return t[f.k]+' '+f.l; }).join(' · '); };
+  return '<div class="'+(d?'note':'okbox')+'" style="font-size:13.5px"><b>⚖ איזון הבוקר באופקים</b> — נכנס: '+esc(tot(a))+' · יצא: '+esc(tot(b))+'<br>'+
+    (d ? '⚠ '+esc(d.replace(/\+/g,'יצא יותר ').replace(/−/g,'יצא פחות '))+
+        (fromLast.length?'<br><span style="font-weight:400">כניסה לפי הספירה האחרונה: '+esc(fromLast.join(' · '))+'</span>':'')+(lone.length?'<br><span style="font-weight:400">נספר רק בצד אחד: '+esc(lone.join(' · '))+'. אם משאית לא נספרה בכניסה — הפער הוא מה שהיה עליה.</span>':'')
+      : '✓ הכל מסתדר — כל בלון שנכנס יצא')+'</div>';
+}
+function countsLogCard(){
+  var L=countLog(), t=todayStr(), today=L.filter(function(x){ return x.day===t; }), days=[];
+  L.forEach(function(x){ if(x.day!==t && days.indexOf(x.day)<0) days.unshift(x.day); });
+  return '<section class="card"><div class="sec" style="margin:0"><h3>📋 ספירות הבוקר — רמפה ומשאיות</h3><span class="muted num" style="font-size:13px">'+esc(t)+'</span></div>'+
+    '<button class="btn btn-accent btn-sm" type="button" data-sheet="pastecounts">📋 הדבק ספירות מוואטסאפ</button>'+
+    ofakimBalance(t,L)+(today.length ? today.map(function(x){ return x.kind==='note' ? '<div class="note" style="font-size:14px">📝 '+esc(x.text)+(x.time?' <span class="muted">'+esc(x.time)+'</span>':'')+'</div>' : cRow(x,L); }).join('')
+      : '<p class="hint">עוד אין ספירות היום. מעתיקים מוואטסאפ את ההודעות של אייל (לחיצה ארוכה, לסמן את כולן, העתק) ומדביקים כאן.</p>')+
+    (days.length ? '<details class="amg"><summary>ימים קודמים</summary>'+days.slice(0,14).map(function(d){
+      return '<div style="margin-top:8px"><b>'+esc(weekday(d)+' · '+d)+'</b>'+L.filter(function(x){ return x.day===d; }).map(function(x){ return x.kind==='note' ? '<div class="hint">📝 '+esc(x.text)+'</div>' : '<div style="font-size:14px"><b>'+esc(cName(x))+'</b> <span class="muted">'+esc(x.time||'')+'</span> · <span class="num">'+esc(cVals(x.v))+'</span></div>'; }).join('')+'</div>'; }).join('')+'</details>' : '')+
+  '</section>';
+}
+function pasteSheet(){
+  draft={parsed:null};
+  return '<h2>📋 הדבקת ספירות מוואטסאפ</h2>'+
+    '<p class="hint">בוואטסאפ: לחיצה ארוכה על ההודעה הראשונה של אייל, לסמן את כל ההודעות של הספירה, ״העתק״ — ולהדביק כאן. אפשר גם הודעה אחת.</p>'+
+    '<textarea class="inp" id="pasteTxt" style="min-height:160px" placeholder="[5:57, 4.10.2026] אייל: רמפה כניסה&#10;44 גמ&#10;76 ק״מ …"></textarea>'+
+    '<button class="btn btn-ghost btn-sm" type="button" id="pasteRead">קרא</button><div id="pasteOut"></div>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+}
+function pasteRead(){
+  var p=parseCounts(document.getElementById('pasteTxt').value), L=countLog(), box=document.getElementById('pasteOut'); draft.parsed=p;
+  if(!p.counts.length && !p.notes.length){ box.innerHTML='<p class="err">לא מצאתי ספירות. כל ספירה מתחילה בשורה כמו ״רמפה כניסה״ ואחריה ״44 גמ״.</p>'; return; }
+  var tmp=L.concat(p.counts);
+  box.innerHTML='<div class="okbox">נמצאו '+p.counts.length+' ספירות'+(p.notes.length?' ו־'+p.notes.length+' הערות':'')+'</div>'+
+    p.counts.map(function(c){ return cRow(c,tmp); }).join('')+p.notes.map(function(x){ return '<div class="note" style="font-size:14px">📝 '+esc(x.text)+'</div>'; }).join('')+
+    (p.skipped.length?'<p class="err">לא הבנתי: '+esc(p.skipped.join(' | '))+'</p>':'')+
+    '<button class="btn btn-ok" type="button" id="pasteSave">שמור</button>';
+}
+async function syncCountLog(){
+  if(typeof bot==='undefined' || !BOT_API || bot.status!=='active') return;
+  try{
+    var d=lsGet('gazgal-countlog-dirty',[]);
+    if(d.length){ var L=countLog(), items=L.filter(function(x){ return d.indexOf(x.id)>=0; });
+      var r=await botFetch('/api/counts',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({items:items})});
+      if(r.ok) lsSet('gazgal-countlog-dirty', lsGet('gazgal-countlog-dirty',[]).filter(function(id){ return d.indexOf(id)<0; })); }
+    var since=+lsGet('gazgal-countlog-since',0)||0, g=await botFetch('/api/counts?since='+since); if(!g.ok) return;
+    var j=await g.json(); if((j.items||[]).length){ var have={}, L2=countLog(); L2.forEach(function(x){ have[x.id]=1; });
+      j.items.forEach(function(x){ if(!have[x.id]) L2.push(x); }); lsSet('gazgal-countlog', L2.sort(function(a,b){ return a.at-b.at; })); }
+    lsSet('gazgal-countlog-since', j.now||Date.now());
+  }catch(e){}
+}
+
 /* ---------- ניהול צי (01/10): the driver's side — km, fuel, faults, emergency numbers ----------
    Reports wait in the phone and go to the server when there is signal; the phone makes the id, so a resend never
    writes twice. The office page keeps the dates and the garage log. The emergency numbers and the truck's insurance
@@ -1209,7 +1341,7 @@ async function pollMore(){
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
-  syncPlaces().then(syncStands); flushOutbox(); syncTrucks(); syncFleet();
+  syncPlaces().then(syncStands); flushOutbox(); syncTrucks(); syncFleet(); syncCountLog();
 }
 async function loadOfficeJournal(id){
   var jr=bot.journals.filter(function(x){ return x.id===id; })[0]; if(!jr) return;
@@ -1561,7 +1693,7 @@ function truckCard(){
     '<button class="btn btn-ghost btn-sm" type="button" data-sheet="count" data-preset="me|">ספור את המשאית מחדש</button></section>';
 }
 function viewStock(){
-  return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+truckCard()+fleetBtns()+
+  return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+truckCard()+fleetBtns()+countsLogCard()+
   '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 מחסן / מתקן</button></div>'+
   (state.facility.length?'<section class="card"><h3>מחסן ומתקן היום</h3>'+state.facility.map(function(f){
     return '<div class="sec" style="margin:0"><span><b class="num">'+esc(f.time)+'</b> · '+esc(mvText(f).join(' · ')||'אין שינוי')+(f.swap?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+(f.pink?' · 📄':'')+'</span>'+
@@ -2136,7 +2268,7 @@ function openSheet(kind,preset){
     draft={point:pt, pointText:'', moment:mo, v:{}, plate:myPlate()};
     html='<h2>ספירת מלאי</h2>'+
     '<div class="field"><span class="lbl">איפה סופרים</span><div class="chips" role="group" aria-label="נקודת ספירה">'+
-      ['me','eyal','ramp','other'].map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+POINT_BTN[k]+'</button>'; }).join('')+'</div>'+
+      ['me','eyal','truck3','ramp','other'].map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+POINT_BTN[k]+'</button>'; }).join('')+'</div>'+
       '<input class="inp" id="cOther" placeholder="שם הנקודה" autocomplete="off" hidden></div>'+
     /* יומן משאית: the count belongs to a truck (licence plate), so whoever takes it next goes on from it */
     '<div class="field" id="cTruck"'+(pt==='me'?'':' hidden')+'><span class="lbl">מספר רישוי של המשאית</span>'+
@@ -2235,6 +2367,7 @@ function openSheet(kind,preset){
   if(kind==='fuel'){ html=fuelSheet(); }
   if(kind==='fault'){ html=faultSheet(); }
   if(kind==='sos'){ html=sosSheet(); }
+  if(kind==='pastecounts'){ html=pasteSheet(); }
   if(kind==='deliver' && c && c.kind==='task'){ html=taskDoneSheet(c); kind=''; }
   if(kind==='task'){ html=newTaskSheet(); }
   if(kind==='mktask'){ html=mkTaskSheet(c); }
@@ -2402,6 +2535,7 @@ function saveCount(){
     var ckm=parseInt(((document.getElementById('cKm')||{}).value||'').replace(/\D/g,''),10)||0;
     if(ckm){ c.km=ckm; fleetQueue('km', c.plate, {km:ckm, moment:c.moment}); } }
   state.counts.push(c); save(); render();
+  putCountLog([{id:'A'+c.id, kind:'count', src:'app', day:dayOf(), time:c.time, at:idMs(c), by:state.driver||'', point:c.point, pointText:c.pointText||'', moment:c.moment, plate:c.plate||'', v:c.v}]);
   var msg=countMsg(c);
   draft={savedMsg:msg};
   document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשמר ✓</h2><div class="msg">'+esc(msg)+'</div>'+
@@ -2996,6 +3130,8 @@ document.addEventListener('click',function(ev){
   if(ds.fwhat){ draft.what=ds.fwhat; press('[data-fwhat]',t); return; }
   if(ds.fdrive){ draft.drive=ds.fdrive; press('[data-fdrive]',t); return; }
   if(t.id==='confirmFuel'){ confirmFuel(); return; }
+  if(t.id==='pasteRead'){ pasteRead(); return; }
+  if(t.id==='pasteSave'){ var pp=draft && draft.parsed; if(!pp) return; var nn=putCountLog(pp.counts.concat(pp.notes)); after(nn ? '✓ נשמרו '+pp.counts.length+' ספירות' : 'הספירות האלה כבר נשמרו קודם'); return; }
   if(t.id==='confirmFault'){ confirmFault(); return; }
   if(t.id==='dnShare' || t.id==='dnSave'){ dnShare(ds.dn, t.id==='dnSave'); return; }
   if(ds.geomode){ draft.geoMode=ds.geomode; press('[data-geomode]',t); document.getElementById('geoAdd').hidden=(ds.geomode!=='add'); return; }
