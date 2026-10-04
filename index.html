@@ -1326,8 +1326,9 @@ async function sendLive(closed){
 /* never asks for permission here — only uses it if the driver already allowed location for the app */
 async function livePos(){
   try{ if(navigator.permissions){ var st=await navigator.permissions.query({name:'geolocation'}); if(st.state!=='granted') return null; } }catch(e){ return null; }
-  return new Promise(function(res){ try{ navigator.geolocation.getCurrentPosition(function(p){ res({lat:Math.round(p.coords.latitude*1e5)/1e5, lon:Math.round(p.coords.longitude*1e5)/1e5, acc:Math.round(p.coords.accuracy), at:Date.now()}); },
-    function(){ res(null); }, {maximumAge:60000, timeout:8000}); }catch(e){ res(null); } });
+  /* high accuracy = the GPS itself. Without it the phone may answer from cell towers, hundreds of metres to kilometres off */
+  return new Promise(function(res){ try{ navigator.geolocation.getCurrentPosition(function(p){ res({lat:Math.round(p.coords.latitude*1e5)/1e5, lon:Math.round(p.coords.longitude*1e5)/1e5, acc:Math.round(p.coords.accuracy), at:p.timestamp||Date.now()}); },
+    function(){ res(null); }, {enableHighAccuracy:true, maximumAge:15000, timeout:20000}); }catch(e){ res(null); } });
 }
 
 /* ---- FEEDBACK #26: tomorrow's journal, sent by the office. It waits here; the driver loads it with one tap (#25). ---- */
@@ -1341,7 +1342,7 @@ async function pollMore(){
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
   await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
-  syncPlaces().then(syncStands); flushOutbox(); syncTrucks(); syncFleet(); syncCountLog();
+  syncPlaces().then(syncStands); flushOutbox(); backfillOutbox(); syncTrucks(); syncFleet(); syncCountLog();
 }
 async function loadOfficeJournal(id){
   var jr=bot.journals.filter(function(x){ return x.id===id; })[0]; if(!jr) return;
@@ -2077,6 +2078,19 @@ async function savePdf(){
    stays on the server for 90 days — so a broken phone loses nothing. */
 function outbox(){ return idbGet('kv','outbox').then(function(x){ return x||[]; }).catch(function(){ return []; }); }
 var flushing=false;
+/* every closed day in the phone's archive that never reached the office joins the outbox (the first days were closed
+   before the server took reports) — so the office's history is complete */
+async function backfillOutbox(){
+  if(!BOT_API || bot.status!=='active' || backfillOutbox.done) return; backfillOutbox.done=true;
+  try{ var idx=await dayIndex(), ob=await outbox(), add=0;
+    for(var i=0;i<idx.length;i++){ var x=idx[i]; if(x.sent || ob.some(function(o){ return o.id===x.id; })) continue;
+      var rec=await idbGet('days', x.id); if(!rec) continue; migrateRec(rec);
+      var meta=withDay(rec.day, rec.photos||{}, function(){ var R=report(); return {id:x.id, iso:isoOf(dayOf()), date:dayOf(), journals:journalNos(), driver:state.driver, del:R.del.length, n:state.stops.length,
+        cash:R.t.cash, cheque:R.t.cheque, nq:R.t.nq, later:R.t.later, unpaid:R.t.unpaid, handover:state.handover, gap:hoGap(R), text:reportText(R)}; });
+      ob.push({id:x.id, meta:meta}); add++; }
+    if(add){ await idbPut('kv','outbox',ob); flushOutbox(); }
+  }catch(e){ backfillOutbox.done=false; }
+}
 async function flushOutbox(){
   if(flushing || !BOT_API || bot.status!=='active') return; flushing=true;
   try{
