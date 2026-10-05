@@ -860,13 +860,51 @@ var START_Q = {ofakim:'נחושתן 5, אופקים', hovav:'רמת חובב'};
 var START_FALLBACK = {ofakim:[31.3140,34.6203], hovav:[31.1390,34.7700]};
 function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 async function geocode(q){
-  if(Object.prototype.hasOwnProperty.call(geo,q)) return geo[q];
+  if(Object.prototype.hasOwnProperty.call(geo,q)){ var gv=geo[q]; if(!(gv && gv.miss) && gv!==null) return gv; if(gv && Date.now()-gv.miss<7*864e5) return null; }
   var wait=1100-(Date.now()-lastGeoCall); if(wait>0) await sleep(wait);
   lastGeoCall=Date.now();
   var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he&q='+encodeURIComponent(q));
   if(!r.ok) throw new Error('geo '+r.status);
   var j=await r.json(), p=(j && j[0]) ? [parseFloat(j[0].lat), parseFloat(j[0].lon)] : null;
-  geo[q]=p; saveGeo(); return p;
+  geo[q]=p || {miss:Date.now()}; saveGeo(); return p;
+}
+/* FEEDBACK #60: the journal spells streets differently from the map — "צלנוב" / "צ'לנוב", "זילפה" / "זלפה",
+   "צבי אבידוב" / "אבידוב", "גרשון דובניבוים" / "גרשון דובינבוים". When the plain search fails: Photon (tolerant to
+   spelling) and the map's own search word by word and in short spelling — and a result is taken only when it is on
+   the same street (by the comparison below) in the same town. Photon also answers wrong streets ("זילפה 25" → כביש 25). */
+function gNrm(s){ return String(s||'').replace(/["'׳״`]/g,'').replace(/[.,()\-]/g,' ').replace(/\s+/g,' ').trim(); }
+function gSkel(s){ return gNrm(s).split(' ').map(function(w){ return w.length>2 ? w[0]+w.slice(1).replace(/[יו]/g,'') : w; }).join(' '); }
+function gLev(a,b){ var d=[], i, j; for(i=0;i<=a.length;i++) d[i]=[i]; for(j=1;j<=b.length;j++) d[0][j]=j;
+  for(i=1;i<=a.length;i++) for(j=1;j<=b.length;j++) d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)); return d[a.length][b.length]; }
+function sameStreet(j,m){ var a=gSkel(j), b=gSkel(m); if(!a || !b) return false; if(a===b) return true;
+  var A=a.split(' '), B=b.split(' '), lw=function(X){ return X.slice().sort(function(x,y){ return y.length-x.length; })[0]; };
+  if(B.every(function(w){ return A.indexOf(w)>=0; }) && B.indexOf(lw(A))>=0) return true;   /* "צבי אבידוב" ⊇ "אבידוב" — but not "שמואל" for "שמואל סמברוסקי" */
+  if(A.every(function(w){ return B.indexOf(w)>=0; }) && A.indexOf(lw(B))>=0) return true;
+  return a.length>=5 && gLev(a,b)<=(a.length>=9?2:1); }
+function sameCity(j,m){ var a=gNrm(j).replace(/ /g,''), b=gNrm(m).replace(/ /g,''); return !!a && !!b && (a===b || a.indexOf(b)>=0 || b.indexOf(a)>=0); }
+function cleanStreet(s){ return gNrm(String(s||'').split(/ - |\(/)[0].replace(/^(רח|רחוב|שד|שדרות)\s*['׳.]?\s+/,'')); }
+async function geoJson(url){ var wait=1100-(Date.now()-lastGeoCall); if(wait>0) await sleep(wait); lastGeoCall=Date.now();
+  var r=await fetch(url); if(!r.ok) throw new Error('geo '+r.status); return r.json(); }
+async function fuzzyStreet(street, house, city){
+  var key='fz:'+street+'|'+house+'|'+city, v=geo[key];
+  if(v && !v.miss) return v; if(v && v.miss && Date.now()-v.miss<7*864e5) return null;
+  var s=cleanStreet(street), res=null; if(!s || !city) return null;
+  try{
+    var near=await geocode(city);
+    var ph=await geoJson('https://photon.komoot.io/api/?limit=3'+(near?'&lat='+near[0]+'&lon='+near[1]:'')+'&q='+encodeURIComponent((s+' '+house+' '+city).replace(/\s+/g,' ')));
+    (ph.features||[]).some(function(f){ var p=f.properties||{}, st=p.street||(p.type==='street'?p.name:'');
+      if(st && sameStreet(s,st) && sameCity(city,p.city||'')){ res={p:[f.geometry.coordinates[1], f.geometry.coordinates[0]], how:house && String(p.housenumber)===String(house)?'כתובת':'רחוב'}; return true; } return false; });
+    if(!res){
+      var words=s.split(' ').filter(function(w){ return w.length>=3; }).sort(function(a,b){ return b.length-a.length; });
+      var tries=[s].concat(words.length>1?words:[], [gSkel(s)]).filter(function(x,i,a){ return a.indexOf(x)===i; });
+      for(var i=0;i<tries.length && !res;i++){
+        var L=await geoJson('https://nominatim.openstreetmap.org/search?format=json&limit=3&addressdetails=1&countrycodes=il&accept-language=he&q='+encodeURIComponent(tries[i]+', '+city));
+        (L||[]).some(function(x){ var ad=x.address||{}, road=ad.road||ad.pedestrian||ad.residential||'';
+          if(road && sameStreet(s,road) && sameCity(city, ad.city||ad.town||ad.village||'')){ res={p:[parseFloat(x.lat), parseFloat(x.lon)], how:'רחוב'}; return true; } return false; });
+      }
+    }
+  }catch(e){ return null; }   /* no signal / the service busy: not remembered, tried again next time */
+  geo[key]=res || {miss:Date.now()}; saveGeo(); return res;
 }
 /* FEEDBACK #36/#37: a customer can have several named delivery points ("בית", "משק"). The first one is the default;
    a stop split into two points carries the name of its point in s.point. */
@@ -912,12 +950,24 @@ async function syncStands(){
       standMark(c, state.memory[c].ph); got++; }catch(e){} }
   if(got){ savePhotos(); if(!document.querySelector('.scrim')) render(); }
 }
+/* FEEDBACK #60: the map does not know every street (e.g. סמברוסקי, באר שבע). When a stop placed only by its street or
+   town is marked "✓ סופק", the phone's GPS there becomes the customer's point — for every driver, via the server — if the
+   fix is accurate and near the estimate (the driver may mark it later, somewhere else). */
+async function learnPlace(c){
+  try{ var pos=await here(), ll=[pos.coords.latitude, pos.coords.longitude];
+    if((pos.coords.accuracy||999)>80 || dist(c.pt,ll)>(c.geoHow==='רחוב'?1.5:6) || ptOf(c)) return;
+    state.memory[c.cust]=state.memory[c.cust]||{}; var P=ptsOf(c.cust);
+    P.push({name:c.point||'', lat:Math.round(ll[0]*1e5)/1e5, lon:Math.round(ll[1]*1e5)/1e5, auto:1});
+    touchPlace(c.cust); save(); toast('📍 נשמר המיקום של '+c.name+' — מהפעם הבאה הסידור מדויק');
+  }catch(e){}
+}
 function parkOf(s){ var m=state.memory[s.cust]||{}, pt=ptOf(s); if(!s.point) return m.parking||'';
   return pt && pt.parking ? pt.parking : pt && pt===ptsOf(s.cust)[0] ? (m.parking||'') : ''; }   /* the old note belongs to the first point */
 async function locate(s){
   var pt=ptOf(s); if(pt) return {p:[pt.lat,pt.lon], how:'חנייה שמורה'};
   var city=s.city||'', p=null;
   if(s.street){ p=await geocode((s.street+' '+(s.house||'')).trim()+', '+city); if(p) return {p:p, how:'כתובת'}; }
+  if(s.street){ var fz=await fuzzyStreet(s.street, s.house||'', city); if(fz) return fz; }
   if(s.street && s.house){ p=await geocode(s.street+', '+city); if(p) return {p:p, how:'רחוב'}; }
   if(city){ p=await geocode(city); if(p) return {p:p, how:'יישוב'}; }
   return {p:null, how:'לא נמצא'};
@@ -1542,7 +1592,7 @@ function listTag(s){
   if(md==='task') return '<span class="tag t-info">🛠 מטלה</span>'+(isAm(s)?' <span class="tag t-warn">🌅 בבוקר</span>':'');
   return (isAm(s)?'<span class="tag t-warn">🌅 בבוקר</span> ':'')+(md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
     (s.hot?' <span class="tag t-acc">חמה</span>':'')+(s.cityGuess?' <span class="tag t-warn">יישוב משוער</span>':'')+
-    ((s.geoHow==='רחוב'||s.geoHow==='יישוב')?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
+    (s.geoHow==='רחוב'?' <span class="tag t-info">📍 לפי הרחוב</span>':s.geoHow==='יישוב'?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
 }
 function custNo(s){ return s.cust && !/^hot-/.test(s.cust) ? s.cust : ''; }
 function actsHtml(c){
@@ -1795,7 +1845,10 @@ function report(){
   var del=state.stops.filter(function(s){ return s.status==='delivered'; }), fail=state.stops.filter(function(s){ return s.status==='failed'; });
   var by={collect:{q1:0,q2:0,sum:0,n:0}, paid:{q1:0,q2:0,sum:0,n:0}, credit:{q1:0,q2:0,sum:0,n:0}};
   var q={1:0,2:0}, e={1:0,2:0}, pb={cash:{1:0,2:0}, cheque:{1:0,2:0}, rcpt:{1:0,2:0}}, amg={'5':0,'2.5':0}, kits=[], loan={1:0,2:0}, loans=[];
-  del.forEach(function(s){ if(s.kind==='task') return; var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
+  del.forEach(function(s){
+    if(s.kind==='task'){ var tr=s.result||{}, tl=tr.loan, te=tr.empties||{}; e[1]+=te[1]||0; e[2]+=te[2]||0;   /* FEEDBACK #59: empties picked up on a task */
+      if(tl && (tl[1]||tl[2])){ loan[1]+=tl[1]||0; loan[2]+=tl[2]||0; loans.push(s); } return; }
+    var md=mode(s), b=by[md==='verify'?'collect':(md==='standing'?'credit':md)], bk=payBucket(s); b.n++;
     var ln=s.result.loan; if(ln && (ln[1]||ln[2])){ loan[1]+=ln[1]||0; loan[2]+=ln[2]||0; loans.push(s); }
     s.items.forEach(function(i){ var a=i.actual||0;
       if(i.code==='1'||i.code==='2'){ b['q'+i.code]+=a; q[i.code]+=a; pb[bk][i.code]+=a; }
@@ -1948,7 +2001,7 @@ function orderRow(s){
   var sup = dl ? cell(qtyOf(s,'1',true), qtyOf(s,'1',true)!==qtyOf(s,'1',false))+cell(qtyOf(s,'2',true), qtyOf(s,'2',true)!==qtyOf(s,'2',false))
     : '<td class="c" colspan="2"><b>'+(s.status==='failed'?(r.cancelled?'בוטל ע״י המשרד':'לא סופק'):'לא טופל')+'</b></td>';
   var emp = dl ? cell(r.empties[1])+cell(r.empties[2]) : '<td></td><td></td>';
-  var pay = !dl ? '' : py.method==='none' ? esc(s.kind==='task'?'ללא תשלום':mode(s)==='credit'?'אשראי':mode(s)==='standing'?'הו״ק':'שולם מראש') :
+  var pay = !dl ? '' : py.method==='none' ? esc(s.kind==='task'||py.pickup?'ללא תשלום':mode(s)==='credit'?'אשראי':mode(s)==='standing'?'הו״ק':'שולם מראש') :
     esc(PAY[py.method])+(py.method==='prepaid'?'':' '+money(py.amount))+(py.method==='cheque' && py.no?' · מס׳ '+esc(py.no):'')+(py.method==='cheque' && py.due?' · '+esc(fmtD(py.due)):'');
   var extra = s.items.filter(function(i){ return i.code!=='1' && i.code!=='2' && (i.qty || (dl && i.actual)); })
     .map(function(i){ return (i.qty?'הוזמן '+i.qty+' ':'')+(dl?'סופק '+(i.actual||0)+' ':'')+itemLabel(i); });
@@ -2383,7 +2436,7 @@ function openSheet(kind,preset){
   if(kind==='sos'){ html=sosSheet(); }
   if(kind==='pastecounts'){ html=pasteSheet(); }
   if(kind==='deliver' && c && c.kind==='task'){ html=taskDoneSheet(c); kind=''; }
-  if(kind==='task'){ html=newTaskSheet(); }
+  if(kind==='task'){ html=newTaskSheet(preset==='pickup'); }
   if(kind==='mktask'){ html=mkTaskSheet(c); }
   if(kind==='deliver' && c && c.needsOk){
     /* FEEDBACK #21: no supply until the office approved this order */
@@ -2408,7 +2461,8 @@ function openSheet(kind,preset){
     '<div class="field"><span class="lbl">כמה סופק בפועל</span><div id="dItemsBox">'+dItemsHtml(c)+'</div></div>'+
     '<div class="field"><span class="lbl">ריקים שנאספו</span><div class="steps">'+stepper('e1',draft.e[1],'12 ק״ג')+stepper('e2',draft.e[2],'48 ק״ג')+'</div>'+
       '<details class="amg"><summary>החזיר מיכלים מושאלים (פיקדון)</summary><div class="steps">'+stepper('l1',0,'12 ק״ג')+stepper('l2',0,'48 ק״ג')+'</div>'+
-      '<p class="hint">מיכלים ריקים שהלקוח קיבל בהשאלה ומחזיר עכשיו, מעבר לריקים של ההזמנה. נכנס להערות בדוח, כדי שהמשרד לא יחייב אותו על פיקדון.</p></details></div>'+
+      '<p class="hint">מיכלים ריקים שהלקוח קיבל בהשאלה ומחזיר עכשיו, מעבר לריקים של ההזמנה. נכנס להערות בדוח, כדי שהמשרד לא יחייב אותו על פיקדון.</p></details>'+
+      '<p class="hint">לא סופק גז, רק אספת ריקים? הורד את הגז ל־0 וסמן את הריקים — אין צורך בתשלום.</p></div>'+
     (collects(c) && payer ? '<div class="okbox">שולם בנקודה '+esc(payer.point||'הראשונה')+' — על כל ההזמנה. כאן רק מורידים מיכלים.</div>' : '')+
     (collects(c) && !payer
       ? '<div class="sum"><span>לגבות</span><span class="big num" id="dAmt">'+money(dAmount(c))+'</span></div>'+
@@ -2468,6 +2522,7 @@ function openSheet(kind,preset){
   if(kind==='hot'){
     draft={q:{'1':0,'2':1}, pay:'collect', pos:'map', kit:false};
     html='<h2>הזמנה חמה</h2>'+'<button class="btn btn-ghost btn-sm" type="button" data-sheet="task">🛠 זו מטלה, לא גז — התקנה, בדיקה, איסוף…</button>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-sheet="task" data-preset="pickup">♻️ רק איסוף ריקים — למשל מיכל שהיה בהשאלה</button>'+
     (BOT_API && bot.status==='active' ? '<button class="btn btn-ghost btn-sm" type="button" data-sheet="inbox">📥 הודעות מהבוט'+(newCount()?' ('+newCount()+' חדשות)':'')+'</button>' : '')+
     '<button class="btn btn-ghost btn-sm" type="button" data-sheet="office">📥 מצילום של המשרד (וואטסאפ)</button>'+'<p class="hint">הזמנה שנכנסה תוך כדי סבב, או הזמנה מודפסת שקיבלת מנהג אחר. מחיר: 12 ק״ג '+money(PRICE['1'])+' · 48 ק״ג '+money(PRICE['2'])+'.</p>'+
     '<div class="field"><label for="hName">שם</label><input class="inp" id="hName" autocomplete="off"></div>'+
@@ -2649,7 +2704,9 @@ function mergedStop(s){
 }
 function confirmDeliver(){
   var c=byId(draft.stop)||cur(), total=Object.keys(draft.q).reduce(function(t,k){ return t+(/^dep/.test(k)?0:(draft.q[k]||0)); },0);
-  if(!total){ showErr('dErr','לא סומנה כמות. אם לא סופק כלום, סמן ״לא סופק״.'); return; }
+  /* FEEDBACK #59: no gas, only empties collected (e.g. a loaned cylinder the customer owed) — saved, no payment needed */
+  var back=(draft.e[1]||0)+(draft.e[2]||0)+(draft.loan[1]||0)+(draft.loan[2]||0), pickOnly=!total && back>0;
+  if(!total && !back){ showErr('dErr','לא סומנה כמות. רק אספת ריקים? סמן אותם ב״ריקים שנאספו״ או ב״החזיר מיכלים מושאלים״. לא היה כלום — ״לא סופק״.'); return; }
   var noPrice=dItems(c).filter(function(i){ return i.actual && !i.price; })[0];
   if(noPrice){ showErr('dErr','חסר מחיר ל'+ITEM_NAME[noPrice.code]+'.'); return; }
   /* office feedback מ4: a discount needs a lower price and its reason */
@@ -2674,7 +2731,7 @@ function confirmDeliver(){
   if(draft.geo && !draft.geoMode){ showErr('dErr','המיקום נקלט — בחר אם להחליף את המיקום השמור או להוסיף נקודה.'); return; }
   var gName=((document.getElementById('geoName')||{}).value||'').trim(), gOld=((document.getElementById('geoOld')||{}).value||'').trim();
   if(draft.geo && draft.geoMode==='add' && ptsOf(c.cust).length && !gName && !c.point){ showErr('dErr','תן שם לנקודה החדשה (למשל ״משק״).'); return; }
-  if(collects(c) && !draft.paidBy){
+  if(collects(c) && !draft.paidBy && !(pickOnly && !draft.method)){
     if(!draft.method){ showErr('dErr','בחר איך שולם.'); return; }
     if(draft.method==='cheque'){
       var camt=parseFloat(String(document.getElementById('chqAmt').value||'').replace(',','.'))||0;
@@ -2689,6 +2746,8 @@ function confirmDeliver(){
     } else pay={method:draft.method, amount:amount};
     if(pay.method!=='unpaid' && (draft.pf.length || pfT)){ pay.for=draft.pf.slice(); if(pfT) pay.forText=pfT; }
   }
+  if(pickOnly && pay.method==='none') pay.pickup=true;
+  if(pickOnly) c.officeNote='לא סופק גז — רק נאספו ריקים'+(c.officeNote?' · '+c.officeNote:'');
   touchDay(); c.items=items; c.status='delivered';
   c.result={at:Date.now(), payment:pay, empties:{1:draft.e[1]||0, 2:draft.e[2]||0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   if(disc) c.result.disc=disc;
@@ -2707,6 +2766,7 @@ function confirmDeliver(){
   if(park || draft.geo) touchPlace(c.cust);
   if(draft.stand){ memPhotos[c.cust]=draft.stand; if(!/^hot-/.test(c.cust)){ state.memory[c.cust].ph=Date.now(); touchPlace(c.cust); standMark(c.cust, state.memory[c.cust].ph); standDirty(c.cust); } }
   if(draft.stand || draft.cheque) savePhotos();
+  if(!draft.geo && !ptOf(c) && !/^hot-/.test(c.cust) && c.pt && /רחוב|יישוב/.test(c.geoHow||'')) learnPlace(c);
   var wantDn=draft.wantDn;
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : '')+(disc?' · עם הנחה':''));
   if(wantDn) openSheet('dn', c.id);
@@ -2943,17 +3003,18 @@ function mkTaskSheet(c){
     '<div class="field"><label for="mkText">מה צריך לעשות</label><textarea class="inp" id="mkText">'+esc(c.note||'')+'</textarea></div>'+durChips()+
     '<p class="err" id="mkErr" hidden></p><button class="btn btn-accent" type="button" id="confirmMkTask">הפוך למטלה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
-function newTaskSheet(){
-  draft={dur:20, pos:'map', am:false, tpay:'none'};
+function newTaskSheet(pickup){
+  draft={dur:20, pos:pickup?'next':'map', am:false, tpay:'none'};
   var f=function(id,l,extra){ return '<div class="field"><label for="'+id+'">'+l+'</label><input class="inp'+(extra||'')+'" id="'+id+'" autocomplete="off"></div>'; };
   return '<h2>🛠 מטלה חדשה</h2><p class="hint">עצירה בלי גז — התקנה, בדיקה, איסוף. נכנסת לסידור ההליכה, להערכה של המשרד ולדוח.</p>'+
-    '<div class="field"><label for="tText">מה צריך לעשות</label><textarea class="inp" id="tText" placeholder="למשל: חיבור מנגל לצובר, בדיקת דליפה"></textarea></div>'+
+    '<div class="field"><label for="tText">מה צריך לעשות</label><textarea class="inp" id="tText" placeholder="למשל: חיבור מנגל לצובר, בדיקת דליפה">'+(pickup?'איסוף מיכל ריק שהיה בהשאלה':'')+'</textarea></div>'+
+    (pickup?'<p class="hint">אחרי ״הוסף לסבב״ — ״✓ בוצע״ וסמן כמה ריקים נאספו. הם נכנסים לספירת המשאית ולדוח.</p>':'')+
     f('tName','שם הלקוח')+'<div class="grid2">'+f('tPhone','טלפון',' num')+f('tCust','מס׳ צרכן (אם יש)',' num')+'</div>'+
     '<div class="grid2">'+f('tStreet','רחוב')+f('tHouse','מספר',' num')+'</div>'+'<div class="grid2">'+f('tEnt','כניסה')+f('tApt','דירה')+'</div>'+f('tCity','יישוב')+
     durChips()+
     '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+['collect','prepaid','none'].map(function(k){ return '<button type="button" class="chip" data-tpay0="'+k+'" aria-pressed="'+(k==='none')+'">'+TASK_PAY[k]+'</button>'; }).join('')+'</div>'+
       '<input class="inp num" id="tAmt0" inputmode="decimal" autocomplete="off" placeholder="כמה לגבות (₪)" hidden></div>'+
-    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['map','איפה שהכי קרוב במסלול'],['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]==='map')+'">'+x[1]+'</button>'; }).join('')+
+    '<div class="field"><span class="lbl">מתי</span><div class="chips">'+[['map','איפה שהכי קרוב במסלול'],['next','עצירה הבאה'],['end','בסוף הסבב']].map(function(x){ return '<button type="button" class="chip" data-hpos="'+x[0]+'" aria-pressed="'+(x[0]===draft.pos)+'">'+x[1]+'</button>'; }).join('')+
       '<button type="button" class="chip" data-tam="1" aria-pressed="false">🌅 בבוקר</button></div></div>'+
     '<p class="err" id="tErr0" hidden></p><button class="btn btn-accent" type="button" id="confirmNewTask">הוסף לסבב</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
@@ -2974,8 +3035,11 @@ function confirmNewTask(){
   addStop(st, draft.pos, '🛠 '+st.name);
 }
 function taskDoneSheet(c){
-  draft={stop:c.id, method:c.taskPay==='prepaid'?'prepaid':c.taskAmt?null:'none'};
+  draft={stop:c.id, method:c.taskPay==='prepaid'?'prepaid':c.taskAmt?null:'none', e:{1:0,2:0}, loan:{1:0,2:0}};
   return '<h2>🛠 בוצע — '+esc(c.name)+'</h2><div class="note" style="font-weight:800">'+esc(c.task||'')+'</div>'+
+    '<div class="field"><span class="lbl">ריקים שנאספו (אם יש)</span><div class="steps">'+stepper('e1',0,'12 ק״ג')+stepper('e2',0,'48 ק״ג')+'</div>'+
+      '<details class="amg"'+(/השאלה|פיקדון|מושאל/.test(c.task||'')?' open':'')+'><summary>מיכלים מושאלים שהוחזרו (פיקדון)</summary><div class="steps">'+stepper('l1',0,'12 ק״ג')+stepper('l2',0,'48 ק״ג')+'</div>'+
+      '<p class="hint">ריק שהלקוח קיבל בהשאלה ומחזיר — נרשם בדוח, כדי שהמשרד לא יחייב אותו על פיקדון.</p></details></div>'+
     '<div class="field"><label for="tDone">מה נעשה (לא חובה)</label><textarea class="inp" id="tDone" placeholder="למשל: חובר מנגל, נבדקה דליפה — תקין"></textarea></div>'+
     (c.taskPay==='prepaid'?'<div class="okbox">שולם מראש במשרד — לא גובים.</div>':'')+
     '<div class="field"><span class="lbl">תשלום</span><div class="chips">'+[['none','ללא תשלום'],['cash','מזומן'],['cheque','צ׳ק'],['later','ישלם למשרד'],['prepaid','שולם מראש במשרד']].map(function(x){ return '<button type="button" class="chip" data-tpay="'+x[0]+'" aria-pressed="'+(draft.method===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>'+
@@ -2992,7 +3056,8 @@ function confirmTask(){
   var done=(document.getElementById('tDone').value||'').trim();
   c.items.forEach(function(i){ i.actual=0; }); c.status='delivered'; c.officeNote=(document.getElementById('tNote').value||'').trim();
   c.result={at:Date.now(), payment:draft.method==='none'?{method:'none',amount:0}:draft.method==='prepaid'?{method:'prepaid',amount:0}:{method:draft.method, amount:Math.round(amt*100)/100, owed:c.taskAmt||Math.round(amt*100)/100},
-    empties:{1:0,2:0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), done:done};
+    empties:{1:draft.e[1]||0, 2:draft.e[2]||0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), done:done};
+  if(draft.loan[1] || draft.loan[2]) c.result.loan={1:draft.loan[1], 2:draft.loan[2]};
   if(c.officeTask) taskAck(c.officeTask,'done', done||'בוצע');
   after('✓ בוצע: '+c.name);
 }
