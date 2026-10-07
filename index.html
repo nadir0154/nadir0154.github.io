@@ -265,7 +265,11 @@ var PAY = {cash:'מזומן', cheque:'צ׳ק', office:'אשראי דרך המש�
 var PAY_FOR = ['קומפלט','מיכל זר','חוב קודם','אחר'];   /* office feedback מ2: what the money was for */
 var COMPANY = 'גז גל ואנונו בע״מ', COMPANY_ID = '513040790';   /* FEEDBACK #48: the delivery note's header */
 var POINTS = {me:'נדיר', eyal:'אייל', truck3:'משאית שניה', ramp:'רמפה'};
-var POINT_BTN = {me:'המשאית שלי', eyal:'משאית אייל', truck3:'משאית שניה', ramp:'רמפה', other:'אחר'};
+var POINT_BTN = {me:'משאית נדיר', eyal:'משאית אייל', truck3:'משאית שניה', ramp:'רמפה', other:'אחר'};
+/* count points are the same on every phone (me = Nadir's truck, eyal = Eyal's) — "my truck" is the paired driver's own */
+var DRIVER_KEY_LS='gazgal-driver-key';
+function ME(){ return lsGet(DRIVER_KEY_LS,'')==='eyal' ? 'eyal' : 'me'; }
+function pointBtn(k){ return k===ME() ? 'המשאית שלי' : POINT_BTN[k]; }
 var MOMENTS = ['כניסה','יציאה','יציאה למתקן','סוף יום'];
 var CF = [ {k:'gm',l:'גמ',d:'גדול מלא'}, {k:'km',l:'קמ',d:'קטן מלא'}, {k:'gr',l:'גר',d:'גדול ריק'}, {k:'kr',l:'קר',d:'קטן ריק'} ];
 var AF = [ {k:'a5m',kg:'5',s:'מלא'}, {k:'a5r',kg:'5',s:'ריק'}, {k:'a25m',kg:'2.5',s:'מלא'}, {k:'a25r',kg:'2.5',s:'ריק'} ];
@@ -1500,9 +1504,10 @@ function runOfficeText(){
 }
 async function pairAdmin(){
   var inp=document.getElementById('adminCode'), err=document.getElementById('pairErr'), code=inp?inp.value:''; if(!code) return;
-  try{ var r=await botFetch('/api/pair/admin',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code:code})});
+  try{ var r=await botFetch('/api/pair/admin',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({code:code, driver:(document.getElementById('pairDriver')||{}).value||''})});
     if(inp) inp.value='';
-    if(r.ok){ setBotStatus('active'); closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; }
+    if(r.ok){ var pj=await r.json().catch(function(){ return {}; }); if(pj.driver) lsSet(DRIVER_KEY_LS, pj.driver); bot.name=pj.name||bot.name||'';
+      setBotStatus('active'); closeSheet(); render(); toast('✓ מחובר — '+(pj.name||'לבוט המשרד')); startPolling(); return; }
     err.hidden=false; err.textContent = r.status===429 ? 'יותר מדי ניסיונות — נסה שוב בעוד שעה' : 'הקוד לא נכון';
   }catch(e){ err.hidden=false; err.textContent='אין חיבור לשרת'; }
 }
@@ -1515,6 +1520,7 @@ async function pairStart(){
     if(!j.code) throw new Error('no code');
     setBotStatus('pending'); draft={pairCode:j.code, bot:j.bot};
     var box=document.getElementById('pairBox'); if(box) box.innerHTML=
+      '<div class="field"><label for="pairDriver">הנהג בטלפון הזה</label><select class="inp" id="pairDriver"><option value="nadir">נדיר</option><option value="eyal">אייל</option></select></div>'+
       '<div class="field"><label for="adminCode">קוד מנהל</label><input class="inp" id="adminCode" type="password" autocomplete="off">'+
       '<button class="btn btn-ok btn-sm" type="button" id="pairAdmin">חבר</button><p class="err" id="pairErr" hidden></p></div>'+
       (j.bot ? '<p class="hint" style="margin-top:8px">או בלי קוד: שלח לבוט בוואטסאפ, מהמספר שלך, <b class="num">חבר '+esc(j.code)+'</b> — '+
@@ -1522,7 +1528,7 @@ async function pairStart(){
       '<p class="hint" id="pairWait">מחכה לחיבור…</p>';
     for(var i=0;i<200;i++){ await sleep(3000); if(!document.getElementById('pairBox')) return;
       var s=await (await botFetch('/api/pair')).json().catch(function(){ return {}; });
-      if(s.status==='active'){ setBotStatus('active'); bot.name=s.name||''; closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; } }
+      if(s.status==='active'){ if(s.driver) lsSet(DRIVER_KEY_LS, s.driver); setBotStatus('active'); bot.name=s.name||''; closeSheet(); render(); toast('✓ מחובר לבוט המשרד'); startPolling(); return; } }
   }catch(e){ toast('אין חיבור לשרת הבוט. בדוק קליטה ונסה שוב.'); }
 }
 function botCard(){
@@ -1571,7 +1577,7 @@ function inboxBtn(){
    puts empties (and returned loaned cylinders) on, every warehouse / facility stop adds or removes.
    With no count today, it starts from yesterday's balance, the same as the end-of-day reconciliation. */
 function truckNow(){
-  var mine=state.counts.filter(function(c){ return c.point==='me' && idMs(c); }), last=mine[mine.length-1];
+  var mine=state.counts.filter(function(c){ return c.point===ME() && idMs(c); }), last=mine[mine.length-1];
   if(!last){ var ex=report().exp; return ex ? {v:ex, from:'מהיתרות של אתמול', n:done().filter(function(x){ return x.status==='delivered'; }).length} : null; }
   var t=idMs(last), v={gm:last.v.gm||0, km:last.v.km||0, gr:last.v.gr||0, kr:last.v.kr||0}, n=0;
   (state.facility||[]).forEach(function(f){ if(idMs(f)>t){ var d=moveOf(f); CF.forEach(function(x){ v[x.k]+=d[x.k]; }); } });
@@ -1704,7 +1710,7 @@ function viewMorning(){
   '</main>';
 }
 function exitCountCard(){
-  if(state.phase!=='route' || state.skipExitCount || done().length || state.counts.some(function(x){ return x.point==='me'; })) return '';
+  if(state.phase!=='route' || state.skipExitCount || done().length || state.counts.some(function(x){ return x.point===ME(); })) return '';
   return '<section class="card" style="border:2px solid var(--accent)"><h3 style="margin:0">🛻 ספירת יציאה מהמתקן</h3>'+
     '<p class="hint">סופרים את המשאית לפני שיוצאים, עם מספר הרישוי שלה. מהספירה הזאת האפליקציה עוקבת אחרי כל בלון, היא ה״פתיחה״ בדוח, וההפרש מהסגירה של המשאית אתמול הוא מה שהמתקן העמיס ופרק — להשוואה לטופס הוורוד.</p>'+
     '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count" data-preset="me|יציאה">ספור עכשיו</button><button class="btn btn-ghost btn-sm" type="button" id="skipExitCount">לא היום</button></div></section>';
@@ -1881,7 +1887,7 @@ function report(){
       if(isDep(i) && a) kits.push({s:s, kg:i.code==='dep1'?'12':'48', n:a}); });
     b.sum+=totalOf(s,true);
     e[1]+=s.result.empties[1]||0; e[2]+=s.result.empties[2]||0; });
-  var open=firstCount('me','יציאה'), eve=lastCount('me','סוף יום');
+  var open=firstCount(ME(),'יציאה'), eve=lastCount(ME(),'סוף יום');
   var prev = state.prevEve!==undefined ? state.prevEve : state.prevManual || state.truckPrev ||
     (function(){ var lc=lastClose(); return lc && lc.date!==dayOf() && (!state.truck || !lc.plate || lc.plate===state.truck) ? lc : null; })();
   /* יומן משאית (01/10, from a day with a truck plate): the opening ("פתיחה") IS this morning's exit count, and what the
@@ -2356,14 +2362,14 @@ function refreshAmt(){
 function openSheet(kind,preset){
   var c=(preset && byId(preset)) || cur(), html='';
   if(kind==='count'){
-    var pr=(preset||'').split('|'), pt=pr[0]||'me', mo=pr[1]||nextMoment(pt);
+    var pr=(preset||'').split('|'), pt=pr[0]||ME(), mo=pr[1]||nextMoment(pt);
     draft={point:pt, pointText:'', moment:mo, v:{}, plate:myPlate()};
     html='<h2>ספירת מלאי</h2>'+
     '<div class="field"><span class="lbl">איפה סופרים</span><div class="chips" role="group" aria-label="נקודת ספירה">'+
-      ['me','eyal','truck3','ramp','other'].map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+POINT_BTN[k]+'</button>'; }).join('')+'</div>'+
+      [ME()].concat(['me','eyal','truck3','ramp','other'].filter(function(k){ return k!==ME(); })).map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+pointBtn(k)+'</button>'; }).join('')+'</div>'+
       '<input class="inp" id="cOther" placeholder="שם הנקודה" autocomplete="off" hidden></div>'+
     /* יומן משאית: the count belongs to a truck (licence plate), so whoever takes it next goes on from it */
-    '<div class="field" id="cTruck"'+(pt==='me'?'':' hidden')+'><span class="lbl">מספר רישוי של המשאית</span>'+
+    '<div class="field" id="cTruck"'+(pt===ME()?'':' hidden')+'><span class="lbl">מספר רישוי של המשאית</span>'+
       (plates().length?'<div class="chips" role="group" aria-label="משאית">'+plates().slice(0,4).map(function(p){ return '<button type="button" class="chip num" data-cplate="'+esc(p)+'" aria-pressed="'+(p===draft.plate)+'">'+esc(p)+'</button>'; }).join('')+'</div>':'')+
       '<input class="inp num" id="cPlate" inputmode="numeric" autocomplete="off" placeholder="מספר רישוי (ספרות בלבד)" value="'+esc(draft.plate)+'">'+
       '<input class="inp num" id="cKm" inputmode="numeric" autocomplete="off" placeholder="ק״מ במד (לא חובה — לטיפולים)"></div>'+
@@ -2615,11 +2621,11 @@ function saveCount(){
   var any=Object.keys(draft.v).some(function(k){ return draft.v[k]>0; });
   if(!any){ showErr('cErr','לא הוזן אף מספר.'); return; }
   if(draft.point==='other' && !draft.pointText){ showErr('cErr','כתוב את שם הנקודה.'); return; }
-  if(draft.point==='me' && plateOk(draft.plate).length<5){ showErr('cErr','כתוב את מספר הרישוי של המשאית.'); return; }
+  if(draft.point===ME() && plateOk(draft.plate).length<5){ showErr('cErr','כתוב את מספר הרישוי של המשאית.'); return; }
   var c={id:'C'+Date.now(), point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v,
     time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   var mv=null, prevT=null;
-  if(c.point==='me'){ c.plate=plateOk(draft.plate); lsSet('gazgal-my-truck', c.plate);
+  if(c.point===ME()){ c.plate=plateOk(draft.plate); lsSet('gazgal-my-truck', c.plate);
     /* the morning exit count: the truck's last count (before today) becomes "יתרות מיום קודם", the difference is the facility */
     if(c.moment==='יציאה'){
       if(!state.truckPrev || state.truckPrev.plate!==c.plate){ var tp=trucks()[c.plate]; state.truckPrev = tp && tp.day!==dayOf() ? {date:tp.day, v:tp.v, moment:tp.moment, plate:c.plate} : null; }
@@ -2633,7 +2639,7 @@ function saveCount(){
   var msg=countMsg(c);
   draft={savedMsg:msg};
   document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשמר ✓</h2><div class="msg">'+esc(msg)+'</div>'+
-    (c.moment==='יציאה' && c.point==='me' ? (prevT
+    (c.moment==='יציאה' && c.point===ME() ? (prevT
       ? '<div class="okbox" style="color:var(--ink);background:var(--surface)"><b>🏭 מה קרה במתקן</b> — לפי הספירה הזאת מול הסגירה של משאית '+esc(c.plate)+' ('+esc(prevT.date)+'):<br><b>'+esc(moveWords(mv)||'אין שינוי')+'</b><br><span class="hint">להשוות לטופס הוורוד. לא תואם? טעות בספירה או במתקן — ספור שוב או סמן לפקידה.</span></div>'+
         '<span class="lbl">הטופס הוורוד (לא חובה)</span>'+photoPick('pinkx','צלם טופס')
       : '<div class="note">אין עדיין סגירה של משאית '+esc(c.plate)+' באפליקציה, אז אין ממה לחשב מה קרה במתקן. מהיום היא נשמרת, ומחר זה יעבוד לבד.</div>') : '')+
@@ -3194,7 +3200,7 @@ document.addEventListener('click',function(ev){
   if(t.id==='printDoc'){ printPages(); setTimeout(function(){ window.print(); }, 50); return; }
   if(ds.start){ state.start=ds.start; save(); render(); return; }
   if(ds.sheet){ openSheet(ds.sheet, ds.preset); return; }
-  if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); document.getElementById('cTruck').hidden=(ds.cpoint!=='me'); updateCountMsg(); return; }
+  if(ds.cpoint){ draft.point=ds.cpoint; press('[data-cpoint]',t); document.getElementById('cOther').hidden=(ds.cpoint!=='other'); document.getElementById('cTruck').hidden=(ds.cpoint!==ME()); updateCountMsg(); return; }
   if(ds.cplate){ draft.plate=ds.cplate; press('[data-cplate]',t); document.getElementById('cPlate').value=ds.cplate; updateCountMsg(); return; }
   if(ds.cmom){ draft.moment=ds.cmom; press('[data-cmom]',t); updateCountMsg(); return; }
   if(ds.ord){
