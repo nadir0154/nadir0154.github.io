@@ -739,37 +739,61 @@ function updateCountMsg(){
 /* Column bands by the right edge of each text run, on an A4 page 595pt wide. Measured on a real journal. */
 var BAND_ORDER = [[550,'row'],[520,'order'],[505,'set'],[494,'tcode'],[470,'tlabel'],[440,'date'],[385,'cust'],[300,'name'],[230,'street'],[185,'house'],[160,'ent'],[135,'apt'],[112,'area'],[80,'disc'],[45,'total'],[-1,'paid']];
 var BAND_DETAIL = [[430,'note'],[330,'city'],[290,'p1'],[205,'p2'],[180,'code'],[110,'desc'],[70,'qty'],[-1,'price']];
-function band(r,bands,sc){ for(var i=0;i<bands.length;i++){ if(r>bands[i][0]*sc) return bands[i][1]; } return null; }
+function band(r,bands,L){ var n=(r-L.b)/L.a; for(var i=0;i<bands.length;i++){ if(n>bands[i][0]) return bands[i][1]; } return null; }
+/* A journal printed enlarged (07/10: 111%, "fit to page" off) moves every column and cuts off the right edge.
+   The column-header row shows where the columns really are: page x = a·(x on a normal print) + b, fitted on its words. */
+var HEAD_REF = {'תאריך':455,'לקוח':414,'כתובת':270,'הנחה':104,'שלם':43};
+function calibrate(lines){
+  for(var i=0;i<lines.length;i++){
+    var pts=lines[i].items.filter(function(t){ return HEAD_REF[t.s]; }).map(function(t){ return [HEAD_REF[t.s], t.r]; });
+    if(pts.length<3) continue;
+    var n=pts.length, mx=0, my=0, sxx=0, sxy=0;
+    pts.forEach(function(q){ mx+=q[0]/n; my+=q[1]/n; });
+    pts.forEach(function(q){ sxx+=(q[0]-mx)*(q[0]-mx); sxy+=(q[0]-mx)*(q[1]-my); });
+    var a=sxy/sxx, b=my-a*mx;
+    if(a>0.5 && a<2) return {a:a, b:b};
+  }
+  return null;
+}
 async function pdfLines(buf){
   var pdf=await pdfjsLib.getDocument({data:buf, isEvalSupported:false}).promise, pages=[];
   for(var p=1;p<=pdf.numPages;p++){
-    var page=await pdf.getPage(p), tc=await page.getTextContent(), sc=page.getViewport({scale:1}).width/595;
+    var page=await pdf.getPage(p), tc=await page.getTextContent(), pw=page.getViewport({scale:1}).width, sc=pw/595;
     var items=tc.items.filter(function(t){ return t.str && t.str.trim(); }).map(function(t){ return {s:t.str.trim(), x:t.transform[4], r:t.transform[4]+t.width, y:t.transform[5]}; });
     items.sort(function(a,b){ return b.y-a.y || b.x-a.x; });
     var lines=[];
     items.forEach(function(t){ var L=lines[lines.length-1]; if(L && Math.abs(L.y-t.y)<=2.5) L.items.push(t); else lines.push({y:t.y, items:[t]}); });
-    lines.forEach(function(L){ L.items.sort(function(a,b){ return b.x-a.x; }); L.text=L.items.map(function(t){ return t.s; }).join(' '); L.sc=sc; });
+    lines.forEach(function(L){ L.items.sort(function(a,b){ return b.x-a.x; }); L.text=L.items.map(function(t){ return t.s; }).join(' '); });
+    var cal=calibrate(lines) || (pages.length && pages[pages.length-1].cal) || {a:sc, b:0};
+    lines.forEach(function(L){ L.a=cal.a; L.b=cal.b; L.pw=pw; });
+    lines.cal=cal; lines.scaled=Math.abs(cal.a-sc)>0.03 || Math.abs(cal.b)>8;
     pages.push(lines);
   }
   return pages;
 }
 function fields(L,bands){
   var f={};
-  L.items.forEach(function(t){ var k=band(t.r,bands,L.sc); if(!k) return; f[k]=f[k] ? f[k]+' '+t.s : t.s; });
+  var last={};
+  L.items.forEach(function(t){ var k=band(t.r,bands,L); if(!k) return;
+    /* pieces that touch (ק " ג, a name split by the printer) are one word */
+    f[k]=f[k] ? f[k]+(last[k] && last[k].x-t.r<1.2 ? '' : ' ')+t.s : t.s; last[k]=t; });
   return f;
 }
 function isOrderLine(L){
   var f=fields(L,BAND_ORDER);
-  return f.row && /^\d+$/.test(f.row) && f.order && /^\d{5,7}$/.test(f.order) ? f : null;
+  if(f.row && /^\d+$/.test(f.row) && f.order && /^\d{5,7}$/.test(f.order)) return f;
+  /* right edge cut off: no row number and only part of the order number — still an order line by its date and customer */
+  if(f.order && /^\d{2,7}$/.test(f.order) && /^\d\d\/\d\d\/\d\d$/.test(f.date||'') && /^\d+$/.test(f.cust||'')){ f.orderCut=1; return f; }
+  return null;
 }
 function parseJournal(pages){
-  var meta={journal:'',date:'',driver:''}, stops=[], sum={count:null,total:null}, s=null;
+  var meta={journal:'',date:'',driver:''}, stops=[], sum={count:null,total:null}, s=null, cut=false;
   pages.forEach(function(lines){
     lines.forEach(function(L){
       var t=L.text;
       if(!meta.journal && /יומן/.test(t) && /דוח/.test(t)){ var j=L.items.filter(function(i){ return /^\d{4,7}$/.test(i.s); })[0]; if(j) meta.journal=j.s; return; }
-      if(!meta.driver && /^מחלק/.test(t)){
-        var parts=L.items.map(function(i){ return i.s; }), k=parts.indexOf('מחלק'), nm=[];
+      if(!meta.driver && /^מ?חלק /.test(t)){
+        var parts=L.items.map(function(i){ return i.s; }), k=Math.max(parts.indexOf('מחלק'), parts.indexOf('חלק')), nm=[];
         for(var i=k+2;i<parts.length && parts[i]!=='סטטוס';i++) nm.push(parts[i]);
         meta.driver=nm.join(' ');
         var d=parts.filter(function(x){ return /^\d\d\/\d\d\/\d{4}$/.test(x); })[0]; if(d) meta.date=d;
@@ -782,9 +806,10 @@ function parseJournal(pages){
       }
       var of=isOrderLine(L);
       if(of){
-        var tl=(of.tlabel||'').replace(/^=/,'').trim();
-        s={id:of.order, row:+of.row, cust:of.cust||'', name:of.name||'', street:of.street||'', house:of.house||'', ent:of.ent||'', apt:of.apt||'', city:'',
-           type: tl || TYPE_BY_CODE[of.tcode] || 'באספקה', paidFlag: /ש/.test(of.paid||''), disc: parseFloat(of.disc)||0,
+        var tl=(of.tlabel||'').replace(/^=/,'').trim(), tc=(of.tcode||'').replace(/^=/,'').trim(), oid=of.order;
+        if(of.orderCut){ cut=true; oid=of.order+'-'+of.cust; var dup=0; while(stops.some(function(x){ return x.id===oid+(dup?'-'+dup:''); })) dup++; if(dup) oid+='-'+dup; }
+        s={id:oid, row:of.orderCut ? stops.length+1 : +of.row, cust:of.cust||'', name:of.name||'', street:of.street||'', house:of.house||'', ent:of.ent||'', apt:of.apt||'', city:'',
+           type: TYPE_BY_CODE[tc] || tl || 'באספקה', paidFlag: /ש/.test(of.paid||''), disc: parseFloat(of.disc)||0,
            total: parseFloat(String(of.total||'').replace(/,/g,''))||0, items:[], note:'', phones:['',''], status:'pending', result:null, hot:false};
         stops.push(s); return;
       }
@@ -808,7 +833,7 @@ function parseJournal(pages){
   stops.forEach(function(x){ var g=gross(x.items,false); x.discGross = x.total ? Math.round((g-x.total)*100)/100 : 0; if(x.city) cities[x.city]=(cities[x.city]||0)+1; });
   var topCity=Object.keys(cities).sort(function(a,b){ return cities[b]-cities[a]; })[0]||'';
   stops.forEach(function(x){ if(!x.city){ x.city=topCity; x.cityGuess=true; } });
-  return {meta:meta, stops:stops, sum:sum};
+  return {meta:meta, stops:stops, sum:sum, scaled:pages.some(function(l){ return l.scaled; }), cut:cut};
 }
 /* append=true adds a second journal to the same day (e.g. Ofakim after Beer Sheva): nothing already done is touched,
    orders already in the day are skipped, and the open stops are re-ordered from where the driver stands. */
@@ -840,7 +865,7 @@ async function importPdf(file, append){
       stops:res.stops, phase:'morning', view:'route', start:state.start||'ofakim', counts:state.counts, memory:state.memory});
     photos={}; savePhotos();
     save(); render(); window.scrollTo(0,0);
-    toast(check.ok ? 'היומן נקרא: '+check.count+' הזמנות' : 'היומן נקרא, אבל יש אי־התאמה — בדוק למטה');
+    toast((res.cut ? '⚠ היומן הודפס מוגדל והצד הימני נחתך — מספרי ההזמנה חלקיים, ובהערות ייתכן שחסרה תחילת המשפט. ' : '')+check.ok ? 'היומן נקרא: '+check.count+' הזמנות' : 'היומן נקרא, אבל יש אי־התאמה — בדוק למטה');
     return true;
   }catch(e){
     render();
