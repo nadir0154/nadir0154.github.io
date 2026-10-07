@@ -983,10 +983,11 @@ async function syncStands(){
    town is marked "✓ סופק", the phone's GPS there becomes the customer's point — for every driver, via the server — if the
    fix is accurate and near the estimate (the driver may mark it later, somewhere else). */
 async function learnPlace(c){
-  try{ var pos=await here(), ll=[pos.coords.latitude, pos.coords.longitude];
-    if((pos.coords.accuracy||999)>80 || dist(c.pt,ll)>(c.geoHow==='רחוב'?1.5:6) || ptOf(c)) return;
+  try{ var pos=await preciseFix(20, 15000), ll=[pos.coords.latitude, pos.coords.longitude];
+    /* moving = marked from the road after leaving; a town-only estimate allows a wide radius, so this is the real guard */
+    if((pos.coords.accuracy||999)>30 || (pos.coords.speed||0)>2 || dist(c.pt,ll)>(c.geoHow==='רחוב'?1.5:6) || ptOf(c)) return;
     state.memory[c.cust]=state.memory[c.cust]||{}; var P=ptsOf(c.cust);
-    P.push({name:c.point||'', lat:Math.round(ll[0]*1e5)/1e5, lon:Math.round(ll[1]*1e5)/1e5, auto:1});
+    P.push({name:c.point||'', lat:Math.round(ll[0]*1e5)/1e5, lon:Math.round(ll[1]*1e5)/1e5, acc:Math.round(pos.coords.accuracy), auto:1});
     touchPlace(c.cust); save(); toast('📍 נשמר המיקום של '+c.name+' — מהפעם הבאה הסידור מדויק');
   }catch(e){}
 }
@@ -1017,6 +1018,16 @@ function optimize(start,pts){
       if(len(np)+1e-9<len(path)){ path=np; better=true; } } }
   return {path:path, km:len(path)};
 }
+/* FEEDBACK #61/#67: a saved point must come from the GPS where the driver stands now — not a fix cached while driving,
+   and not the phone's cell-tower guess (±1–2 km). Watch until the fix is good enough (or time runs out) and keep the best. */
+function preciseFix(want, ms, onProgress){ return new Promise(function(res,rej){ if(!navigator.geolocation) return rej(new Error('no geo'));
+  var best=null, done=false, id=null, t=null;
+  function end(){ if(done) return; done=true; try{ navigator.geolocation.clearWatch(id); }catch(e){} clearTimeout(t); best ? res(best) : rej(new Error('no fix')); }
+  try{ id=navigator.geolocation.watchPosition(function(p){ if(!best || p.coords.accuracy<best.coords.accuracy) best=p;
+      if(onProgress) try{ onProgress(Math.round(p.coords.accuracy)); }catch(e){}
+      if(p.coords.accuracy<=want) end(); },
+    function(){ if(!best){ done=true; clearTimeout(t); rej(new Error('denied')); } }, {enableHighAccuracy:true, maximumAge:0, timeout:ms}); }catch(e){ return rej(e); }
+  t=setTimeout(end, ms); }); }
 function here(){ return new Promise(function(res,rej){ if(!navigator.geolocation) return rej(new Error('no geo'));
   navigator.geolocation.getCurrentPosition(function(p){ res(p); }, rej, {enableHighAccuracy:true, timeout:12000, maximumAge:30000}); }); }
 async function startPoint(fromHere){
@@ -1483,6 +1494,8 @@ async function pollRequests(){
   }catch(e){}
 }
 document.addEventListener('visibilitychange',function(){ if(!document.hidden) pollInbox(); });
+/* FEEDBACK #64: on a phone that cannot install the app (Android Go) the browser may clear site data when space runs low — ask to keep it */
+try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function(ok){ if(!ok) navigator.storage.persist(); }); }catch(e){}
 async function botAck(status,result){
   var id=bot.ackId; if(!id || !BOT_API) return; bot.ackId=null;
   var m=bot.inbox.filter(function(x){ return x.id===id; })[0]; if(m){ m.status=status; m.result=result||''; saveInbox(); }
@@ -2527,6 +2540,9 @@ function openSheet(kind,preset){
       '<p class="hint">רק כשהלקוח כבר שילם ויש גישה למיכלים. לא שילם ואין מי שישלם — ״לא סופק״.</p></div>'+
     '<div class="field"><div class="chips"><button type="button" class="chip" data-wantdn="1" aria-pressed="false">🧾 הלקוח מבקש תעודת משלוח</button></div>'+
       '<p class="hint">אחרי האישור: חתימה על המסך, ועותק ללקוח בוואטסאפ.</p></div>'+
+    /* FEEDBACK #71: the customer asks for an invoice — it reaches the office as a note (with sound), and the report */
+    '<div class="field"><label style="display:flex;gap:10px;align-items:center;font-weight:700"><input type="checkbox" id="invReq" style="width:24px;height:24px"> 🧾 הלקוח מבקש חשבונית</label>'+
+    '<input class="inp" id="invTo" autocomplete="off" placeholder="לאן לשלוח — מייל או וואטסאפ (לא חובה)" style="margin-top:6px"></div>'+
     '<div class="field"><label for="offNote">הערה למשרד (לא חובה)</label><textarea class="inp" id="offNote" placeholder="מה שהיית כותב בעט על ההזמנה — נכנס לדוח לפקידה"></textarea></div>'+
     '<p class="err" id="dErr" hidden></p>'+
     '<button class="btn btn-ok" type="button" id="confirmDeliver">אישור אספקה</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
@@ -2756,6 +2772,8 @@ function confirmDeliver(){
   try{ localStorage.setItem('gazgal-prices', JSON.stringify(prices)); }catch(e){}
   var items=dItems(c), amount=dAmount(c), pay={method:'none', amount:0};
   c.officeNote=(document.getElementById('offNote').value||'').trim();
+  var ivq=document.getElementById('invReq');
+  if(ivq && ivq.checked){ var ivt=(document.getElementById('invTo').value||'').trim(); c.invReq={to:ivt}; c.officeNote='🧾 מבקש חשבונית'+(ivt?' → '+ivt:'')+(c.officeNote?' · '+c.officeNote:''); }
   if(draft.notHome) c.officeNote='הלקוח לא היה בבית — סופק לעמדה'+(c.officeNote?' · '+c.officeNote:'');
   if(draft.notHome && collects(c) && !draft.paidBy && ['prepaid','office','later'].indexOf(draft.method)<0){
     showErr('dErr','הלקוח לא בבית ולא שילם — לא מספקים. סמן ״לא סופק״ ← ״'+NOT_HOME_NOPAY+'״.'); return; }
@@ -2788,10 +2806,10 @@ function confirmDeliver(){
   var park=(document.getElementById('park').value||'').trim();
   state.memory[c.cust]=state.memory[c.cust]||{};
   if(draft.geo){ var P=ptsOf(c.cust), ex=ptOf(c);
-    if(draft.geoMode==='replace' && ex){ ex.lat=draft.geo[0]; ex.lon=draft.geo[1]; }
+    if(draft.geoMode==='replace' && ex){ ex.lat=draft.geo[0]; ex.lon=draft.geo[1]; ex.acc=draft.geoAcc; delete ex.auto; }
     else { var nm=c.point || gName; if(gOld && P.length && !P[0].name) P[0].name=gOld;
       var same=nm ? P.filter(function(x){ return x.name===nm; })[0] : null;
-      if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1]});
+      if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; same.acc=draft.geoAcc; delete same.auto; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1], acc:draft.geoAcc});
       if(nm && P.length>1) c.point=nm; } }
   if(park){ var pp=c.point ? ptOf(c) : null; if(pp) pp.parking=park; else if(!c.point) state.memory[c.cust].parking=park; }
   if(park || draft.geo) touchPlace(c.cust);
@@ -3296,9 +3314,12 @@ document.addEventListener('click',function(ev){
   if(t.id==='goAuto'){ autoRoute(false); return; }
   if(t.id==='reAuto'){ autoRoute(true); return; }
   if(t.id==='gpsPark'){
-    var gm=document.getElementById('gpsMsg'); gm.textContent='מאתר מיקום…';
-    here().then(function(pos){ if(!draft) return; draft.geo=[pos.coords.latitude, pos.coords.longitude];
-      gm.textContent='✓ נקלט (דיוק כ־'+Math.round(pos.coords.accuracy)+' מ׳). יישמר עם אישור האספקה.'; gm.style.color='var(--ok)';
+    var gm=document.getElementById('gpsMsg'); gm.textContent='מאתר GPS…'; gm.style.color='';
+    preciseFix(15, 25000, function(a){ if(gm.isConnected) gm.textContent='מאתר GPS… דיוק כרגע ±'+a+' מ׳'; }).then(function(pos){ if(!draft) return;
+      var acc=Math.round(pos.coords.accuracy);
+      if(acc>40){ draft.geo=null; gm.textContent='⚠ המיקום לא מדויק (±'+acc+' מ׳) — לא נשמר. עמוד ליד הלקוח, בחוץ, ולחץ שוב.'; gm.style.color='var(--bad)'; return; }
+      draft.geo=[pos.coords.latitude, pos.coords.longitude]; draft.geoAcc=acc;
+      gm.textContent='✓ נקלט (דיוק ±'+acc+' מ׳). יישמר עם אישור האספקה.'; gm.style.color='var(--ok)';
       var gc=byId(draft.stop), ex=gc && ptOf(gc), P=gc ? ptsOf(gc.cust) : [];
       /* FEEDBACK #37: a new location never silently replaces the saved one */
       if(ex){ draft.geoMode=null; document.getElementById('geoBox').innerHTML='<div class="chips" role="group" aria-label="מה לעשות עם המיקום">'+
