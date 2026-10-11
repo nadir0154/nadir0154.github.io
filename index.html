@@ -2964,16 +2964,30 @@ function dnSheet(c){
     '<p class="err" id="dnErr" hidden></p>'+
     '<button class="btn btn-ok" type="button" id="issueDn">הפק תעודה</button><button class="btn btn-ghost btn-sm" type="button" data-close>לא עכשיו</button>';
 }
-function initSig(){
-  var cv=document.getElementById('sigPad'); if(!cv || !cv.getBoundingClientRect().width) return;
-  var b=cv.getBoundingClientRect(), k=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+/* Samsung Internet (11/10, יורם's phone): the sheet is laid out a frame later, so the pad had no size yet and stayed dead.
+   Wait for a size (a few frames), and take touch events too where pointer events do not arrive on a canvas. */
+function initSig(tries){
+  var cv=document.getElementById('sigPad'); if(!cv) return;
+  var b=cv.getBoundingClientRect();
+  if(!b.width || !b.height){ if((tries||0)<60) requestAnimationFrame(function(){ initSig((tries||0)+1); }); return; }
+  if(cv.dataset.ready) return; cv.dataset.ready='1';
+  var k=Math.max(1,Math.min(2,window.devicePixelRatio||1));
   cv.width=Math.round(b.width*k); cv.height=Math.round(b.height*k);
   var g=cv.getContext('2d'); g.scale(k,k); g.lineWidth=2.6; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle=g.fillStyle='#111';
   sig={cv:cv, g:g, drawn:false, last:null};
-  var at=function(e){ var r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; };
-  cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} sig.last=at(e); g.beginPath(); g.arc(sig.last.x,sig.last.y,1.3,0,7); g.fill(); sig.drawn=true; });
-  cv.addEventListener('pointermove',function(e){ if(!sig.last) return; e.preventDefault(); var p=at(e); g.beginPath(); g.moveTo(sig.last.x,sig.last.y); g.lineTo(p.x,p.y); g.stroke(); sig.last=p; });
-  ['pointerup','pointercancel','pointerleave'].forEach(function(t){ cv.addEventListener(t,function(){ sig.last=null; }); });
+  var at=function(x,y){ var r=cv.getBoundingClientRect(); return {x:x-r.left, y:y-r.top}; };
+  var down=function(p){ sig.last=p; g.beginPath(); g.arc(p.x,p.y,1.3,0,7); g.fill(); sig.drawn=true; };
+  var move=function(p){ if(!sig.last) return; g.beginPath(); g.moveTo(sig.last.x,sig.last.y); g.lineTo(p.x,p.y); g.stroke(); sig.last=p; };
+  var up=function(){ sig.last=null; };
+  if(window.PointerEvent){
+    cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} down(at(e.clientX,e.clientY)); });
+    cv.addEventListener('pointermove',function(e){ if(!sig.last) return; e.preventDefault(); move(at(e.clientX,e.clientY)); });
+    ['pointerup','pointercancel','pointerleave'].forEach(function(t){ cv.addEventListener(t,up); });
+  }
+  /* touch as well — a browser that sends both is drawn once: touch only acts when no pointer stroke is going on */
+  cv.addEventListener('touchstart',function(e){ e.preventDefault(); if(sig.last) return; var t=e.touches[0]; down(at(t.clientX,t.clientY)); }, {passive:false});
+  cv.addEventListener('touchmove',function(e){ e.preventDefault(); var t=e.touches[0]; move(at(t.clientX,t.clientY)); }, {passive:false});
+  cv.addEventListener('touchend',up); cv.addEventListener('touchcancel',up);
 }
 function issueDn(){
   var c=byId(draft.stop); if(!c || c.dn) return;
