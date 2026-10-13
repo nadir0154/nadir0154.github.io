@@ -882,7 +882,9 @@ async function importPdf(file, append){
 /* ================= walking order on a map =================
    Only the address (street, house, town) goes to OpenStreetMap — never a name or a phone.
    Every result is cached on the phone, and a parking spot saved by GPS always wins over the address. */
-var GEOKEY='gazgal-geo-v1', geo={}, lastGeoCall=0;
+var GEOKEY='gazgal-geo-v2', geo={}, lastGeoCall=0;   /* v1 kept unchecked answers — dropped */
+try{ localStorage.removeItem('gazgal-geo-v1'); }catch(e){}
+var SOUTH='&viewbox=34.20,31.95,35.55,29.45&bounded=1', TOWN_KM=10;   /* Ashkelon / Kiryat Gat down to Eilat */
 try{ geo=JSON.parse(localStorage.getItem(GEOKEY)||'{}')||{}; }catch(e){ geo={}; }
 function saveGeo(){ try{ localStorage.setItem(GEOKEY, JSON.stringify(geo)); }catch(e){} }
 var START_Q = {ofakim:'נחושתן 5, אופקים', hovav:'רמת חובב'};
@@ -892,7 +894,7 @@ async function geocode(q){
   if(Object.prototype.hasOwnProperty.call(geo,q)){ var gv=geo[q]; if(!(gv && gv.miss) && gv!==null) return gv; if(gv && Date.now()-gv.miss<7*864e5) return null; }
   var wait=1100-(Date.now()-lastGeoCall); if(wait>0) await sleep(wait);
   lastGeoCall=Date.now();
-  var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he&q='+encodeURIComponent(q));
+  var r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he'+SOUTH+'&q='+encodeURIComponent(q));
   if(!r.ok) throw new Error('geo '+r.status);
   var j=await r.json(), p=(j && j[0]) ? [parseFloat(j[0].lat), parseFloat(j[0].lon)] : null;
   geo[q]=p || {miss:Date.now()}; saveGeo(); return p;
@@ -901,14 +903,16 @@ async function geocode(q){
    "צבי אבידוב" / "אבידוב", "גרשון דובניבוים" / "גרשון דובינבוים". When the plain search fails: Photon (tolerant to
    spelling) and the map's own search word by word and in short spelling — and a result is taken only when it is on
    the same street (by the comparison below) in the same town. Photon also answers wrong streets ("זילפה 25" → כביש 25). */
-function gNrm(s){ return String(s||'').replace(/["'׳״`]/g,'').replace(/[.,()\-]/g,' ').replace(/\s+/g,' ').trim(); }
+/* the journal's short forms of names the map writes in full */
+var G_ALIAS={'קרן קיימת לישראל':'קקל', 'שדרות קקל':'קקל', 'שדרות קרן קיימת לישראל':'קקל'};
+function gNrm(s){ var n=String(s||'').replace(/["'׳״`]/g,'').replace(/[.,()\-]/g,' ').replace(/\s+/g,' ').trim(); return G_ALIAS[n]||n; }
 function gSkel(s){ return gNrm(s).split(' ').map(function(w){ return w.length>2 ? w[0]+w.slice(1).replace(/[יו]/g,'') : w; }).join(' '); }
 function gLev(a,b){ var d=[], i, j; for(i=0;i<=a.length;i++) d[i]=[i]; for(j=1;j<=b.length;j++) d[0][j]=j;
   for(i=1;i<=a.length;i++) for(j=1;j<=b.length;j++) d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)); return d[a.length][b.length]; }
 function sameStreet(j,m){ var a=gSkel(j), b=gSkel(m); if(!a || !b) return false; if(a===b) return true;
   var A=a.split(' '), B=b.split(' '), lw=function(X){ return X.slice().sort(function(x,y){ return y.length-x.length; })[0]; };
   if(B.every(function(w){ return A.indexOf(w)>=0; }) && B.indexOf(lw(A))>=0) return true;   /* "צבי אבידוב" ⊇ "אבידוב" — but not "שמואל" for "שמואל סמברוסקי" */
-  if(A.every(function(w){ return B.indexOf(w)>=0; }) && A.indexOf(lw(B))>=0) return true;
+  if(A.every(function(w){ return B.indexOf(w)>=0; }) && (A.indexOf(lw(B))>=0 || A.length>=2)) return true;   /* "אנדה עמיר" ⊆ "אנדה עמיר פינקרפלד" */
   return a.length>=5 && gLev(a,b)<=(a.length>=9?2:1); }
 function sameCity(j,m){ var a=gNrm(j).replace(/ /g,''), b=gNrm(m).replace(/ /g,''); return !!a && !!b && (a===b || a.indexOf(b)>=0 || b.indexOf(a)>=0); }
 function cleanStreet(s){ return gNrm(String(s||'').split(/ - |\(/)[0].replace(/^(רח|רחוב|שד|שדרות)\s*['׳.]?\s+/,'')); }
@@ -919,7 +923,7 @@ async function fuzzyStreet(street, house, city){
   if(v && !v.miss) return v; if(v && v.miss && Date.now()-v.miss<7*864e5) return null;
   var s=cleanStreet(street), res=null; if(!s || !city) return null;
   try{
-    var near=await geocode(city);
+    var near=await townAt(city);
     var ph=await geoJson('https://photon.komoot.io/api/?limit=3'+(near?'&lat='+near[0]+'&lon='+near[1]:'')+'&q='+encodeURIComponent((s+' '+house+' '+city).replace(/\s+/g,' ')));
     (ph.features||[]).some(function(f){ var p=f.properties||{}, st=p.street||(p.type==='street'?p.name:'');
       if(st && sameStreet(s,st) && sameCity(city,p.city||'')){ res={p:[f.geometry.coordinates[1], f.geometry.coordinates[0]], how:house && String(p.housenumber)===String(house)?'כתובת':'רחוב'}; return true; } return false; });
@@ -1010,13 +1014,47 @@ async function learnPlace(c){
 }
 function parkOf(s){ var m=state.memory[s.cust]||{}, pt=ptOf(s); if(!s.point) return m.parking||'';
   return pt && pt.parking ? pt.parking : pt && pt===ptsOf(s.cust)[0] ? (m.parking||'') : ''; }   /* the old note belongs to the first point */
+/* the town itself — a settlement, in the south (else "מפלסים" alone is a school up north) */
+async function townAt(city){
+  var key='t:'+city, v=geo[key]; if(v && !v.miss) return v; if(v && v.miss && Date.now()-v.miss<7*864e5) return null;
+  var res=null;
+  try{ var L=await geoJson('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he&featureType=settlement'+SOUTH+'&q='+encodeURIComponent(city));
+    if(L && L[0]) res=[parseFloat(L[0].lat), parseFloat(L[0].lon)];
+    if(!res){ var L2=await geoJson('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he'+SOUTH+'&q='+encodeURIComponent(city)); if(L2 && L2[0]) res=[parseFloat(L2[0].lat), parseFloat(L2[0].lon)]; }
+    var bare=city.replace(/^(קיבוץ|מושב|כפר)\s+/,'');   /* the journal writes "קיבוץ גברעם", the map only "גברעם" */
+    if(!res && bare!==city){ var L3=await geoJson('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&accept-language=he'+SOUTH+'&q='+encodeURIComponent(bare)); if(L3 && L3[0]) res=[parseFloat(L3[0].lat), parseFloat(L3[0].lon)]; }
+  }catch(e){ return null; }
+  geo[key]=res || {miss:Date.now()}; saveGeo(); return res;
+}
+/* the street as the journal wrote it, without what the map cannot know: "(הרחוב האחרון)", a lot number "12585",
+   "משק", or the moshav's own name (= no street) */
+function streetOf(s){ var st=String(s.street||'').replace(/\([^)]*\)/g,' ').replace(/\b\d{3,}\b/g,' ').replace(/\s+/g,' ').trim();
+  if(!st || /^משק$/.test(st) || gNrm(st)===gNrm(s.city||'') || gNrm(st)===gNrm(String(s.city||'').replace(/^(קיבוץ|מושב)\s+/,''))) return ''; return st; }
+/* "חזל" → "חז״ל", "רמבם" → "רמב״ם": the journal drops the gershayim, the map keeps them */
+function gershOf(st){ if(/["'׳״]/.test(st)) return ''; var w=st.split(' '), any=false;
+  w=w.map(function(x){ if(x.length>=3 && x.length<=4 && !/[0-9]/.test(x)){ any=true; return x.slice(0,-1)+'"'+x.slice(-1); } return x; }); return any ? w.join(' ') : ''; }
+async function addrAt(st, house, city, town){
+  var key='a:'+st+'|'+house+'|'+city, v=geo[key]; if(v && !v.miss) return v; if(v && v.miss && Date.now()-v.miss<7*864e5) return null;
+  var tries=[st, cleanStreet(st), gershOf(st), gershOf(cleanStreet(st))].filter(function(x,i,a){ return x && a.indexOf(x)===i; }), res=null;
+  try{
+    for(var i=0;i<tries.length && !res;i++){
+      var L=await geoJson('https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=il&accept-language=he'+SOUTH+'&q='+encodeURIComponent((tries[i]+' '+(house&&house!=='0'?house:'')).trim()+', '+city));
+      var ok=(L||[]).map(function(x){ var ad=x.address||{}, p=[parseFloat(x.lat), parseFloat(x.lon)], road=ad.road||ad.pedestrian||ad.residential||ad.footway||ad.living_street||'';
+          var inTown=sameCity(city, ad.city||ad.town||ad.village||ad.hamlet||ad.municipality||ad.suburb||'') || (town && dist(town,p)<=TOWN_KM);
+          return road && sameStreet(cleanStreet(tries[i]), cleanStreet(road)) && inTown && (!town || dist(town,p)<=TOWN_KM) ? {p:p, hn:String(ad.house_number||'')} : null; })
+        .filter(Boolean);
+      var exact=ok.filter(function(x){ return house && x.hn===String(house); })[0];
+      if(exact) res={p:exact.p, how:'כתובת'}; else if(ok[0]) res={p:ok[0].p, how:'רחוב'};
+    }
+  }catch(e){ return null; }   /* no signal / the service busy: not remembered, tried again next time */
+  geo[key]=res || {miss:Date.now()}; saveGeo(); return res;
+}
 async function locate(s){
   var pt=ptOf(s); if(pt) return {p:[pt.lat,pt.lon], how:'חנייה שמורה'};
-  var city=s.city||'', p=null;
-  if(s.street){ p=await geocode((s.street+' '+(s.house||'')).trim()+', '+city); if(p) return {p:p, how:'כתובת'}; }
-  if(s.street){ var fz=await fuzzyStreet(s.street, s.house||'', city); if(fz) return fz; }
-  if(s.street && s.house){ p=await geocode(s.street+', '+city); if(p) return {p:p, how:'רחוב'}; }
-  if(city){ p=await geocode(city); if(p) return {p:p, how:'יישוב'}; }
+  var city=s.city||'', st=streetOf(s), town=city ? await townAt(city) : null;
+  if(st){ var a=await addrAt(st, s.house||'', city, town); if(a) return a; }
+  if(st){ var fz=await fuzzyStreet(st, s.house||'', city); if(fz && (!town || dist(town,fz.p)<=TOWN_KM)) return fz; }
+  if(town) return {p:town, how:'יישוב'};
   return {p:null, how:'לא נמצא'};
 }
 function dist(a,b){
@@ -1035,13 +1073,47 @@ function optimize(start,pts){
       if(len(np)+1e-9<len(path)){ path=np; better=true; } } }
   return {path:path, km:len(path)};
 }
+/* FEEDBACK #95: when the GPS will not give a good fix (inside the truck, "approximate location", between buildings) the
+   driver puts the point on the map himself: satellite photo, the map moves under a fixed pin. Leaflet comes from the CDN
+   only when needed; the map tiles get only the area, never a name. */
+var LEAF='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/';
+function loadLeaflet(){ if(window.L && window.L.map) return Promise.resolve();
+  return new Promise(function(res,rej){ var l=document.createElement('link'); l.rel='stylesheet'; l.href=LEAF+'leaflet.min.css'; document.head.appendChild(l);
+    var sc=document.createElement('script'); sc.src=LEAF+'leaflet.min.js'; sc.onload=function(){ res(); }; sc.onerror=function(){ rej(new Error('leaflet')); }; document.head.appendChild(sc); }); }
+var TILES={sat:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}','תמונה: Esri'],
+  map:['https://tile.openstreetmap.org/{z}/{x}/{y}.png','© OpenStreetMap']};
+async function mapPick(c){
+  var box=document.createElement('div'); box.id='mapPick'; box.setAttribute('role','dialog'); box.setAttribute('aria-label','סימון מיקום על המפה');
+  box.style.cssText='position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column';
+  box.innerHTML='<div style="background:var(--card,#fff);color:var(--ink,#111);padding:10px 12px;font-weight:700">הזז את המפה עד שהסיכה עומדת על מקום החנייה של '+esc(c.name)+'</div>'+
+    '<div style="position:relative;flex:1"><div id="mpMap" dir="ltr" style="position:absolute;inset:0"></div>'+
+    '<div aria-hidden="true" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:38px;line-height:1;pointer-events:none;z-index:1000">📍</div></div>'+
+    '<div style="background:var(--card,#fff);padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap">'+
+      '<button type="button" class="btn btn-accent" id="mpOk" style="flex:1">✓ זה המקום</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="mpLayer">מפה</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="mpMe">📍 אני כאן</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="mpX">ביטול</button></div>';
+  document.body.appendChild(box);
+  var close=function(){ try{ box.remove(); }catch(e){} };
+  box.querySelector('#mpX').onclick=close;
+  try{ await loadLeaflet(); }catch(e){ close(); toast('אין חיבור למפה — נסה שוב כשיש קליטה'); return; }
+  var ex=ptOf(c), start=ex?[ex.lat,ex.lon]:c.pt||START_FALLBACK.ofakim, z=ex||/כתובת|חנייה/.test(c.geoHow||'')?18:/רחוב/.test(c.geoHow||'')?17:15;
+  var map=L.map('mpMap',{zoomControl:true, attributionControl:true}).setView(start, z), layer='sat';
+  var tl=L.tileLayer(TILES.sat[0],{maxZoom:19, attribution:TILES.sat[1]}).addTo(map);
+  box.querySelector('#mpLayer').onclick=function(){ layer=layer==='sat'?'map':'sat'; map.removeLayer(tl); tl=L.tileLayer(TILES[layer][0],{maxZoom:19, attribution:TILES[layer][1]}).addTo(map); this.textContent=layer==='sat'?'מפה':'לוויין'; };
+  box.querySelector('#mpMe').onclick=function(){ here().then(function(p){ map.setView([p.coords.latitude,p.coords.longitude], 18); }).catch(function(){ toast('אין מיקום מהטלפון — הזז את המפה ידנית'); }); };
+  box.querySelector('#mpOk').onclick=function(){ var m=map.getCenter(); close();
+    if(!draft || draft.stop!==c.id) return;
+    acceptGeo({coords:{latitude:m.lat, longitude:m.lng, accuracy:10}}, 10); draft.geoSrc='map';
+    var gm=document.getElementById('gpsMsg'); if(gm){ gm.textContent='✓ סומן על המפה. יישמר עם אישור האספקה.'; gm.style.color='var(--ok)'; } };
+}
 /* FEEDBACK #61/#67: a saved point must come from the GPS where the driver stands now — not a fix cached while driving,
    and not the phone's cell-tower guess (±1–2 km). Watch until the fix is good enough (or time runs out) and keep the best. */
 function preciseFix(want, ms, onProgress){ return new Promise(function(res,rej){ if(!navigator.geolocation) return rej(new Error('no geo'));
   var best=null, done=false, id=null, t=null;
   function end(){ if(done) return; done=true; try{ navigator.geolocation.clearWatch(id); }catch(e){} clearTimeout(t); best ? res(best) : rej(new Error('no fix')); }
   /* FEEDBACK #79: a cold GPS answers "unavailable"/"timeout" before its first fix — keep waiting; only "denied" stops */
-  try{ id=navigator.geolocation.watchPosition(function(p){ if(!best || p.coords.accuracy<best.coords.accuracy) best=p;
+  try{ id=navigator.geolocation.watchPosition(function(p){ lsSet('gazgal-geo-ok',1); if(!best || p.coords.accuracy<best.coords.accuracy) best=p;
       if(onProgress) try{ onProgress(Math.round(p.coords.accuracy)); }catch(e){}
       if(p.coords.accuracy<=want) end(); },
     function(err){ if(err && err.code===1 && !done){ done=true; clearTimeout(t); try{ navigator.geolocation.clearWatch(id); }catch(e){} rej(new Error('denied')); } },
@@ -1377,6 +1449,7 @@ function newCount(){ return bot.inbox.filter(function(m){ return m.status==='new
    Opening it is not enough. Only the last 18 hours, so yesterday's leftovers do not nag. */
 function openMsgs(){ var since=Date.now()-18*3600e3; return bot.inbox.filter(function(m){ return (m.status==='new'||m.status==='seen') && (m.received||0)>since; }); }
 async function pollInbox(quiet,force){
+  try{ flushDns(); flushSafety(); }catch(e){}
   if(!BOT_API || bot.status!=='active' || (document.hidden && !force)) return;
   try{
     var last=bot.inbox.reduce(function(t,m){ return Math.max(t,m.received||0); },0);
@@ -1391,7 +1464,7 @@ async function pollInbox(quiet,force){
   }catch(e){ /* no signal — try again next time */ }
 }
 function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(!BOT_API || bot.status!=='active') return; pollInbox(true); pollMore(); checkRestore(); sendLive(); syncDn(); bot.polling=setInterval(function(){ pollInbox(); pollMore(); }, 30000);
-  if(bot.liveTimer) clearInterval(bot.liveTimer); bot.liveTimer=setInterval(function(){ if(!document.hidden) sendLive(); }, 180000); }
+  if(bot.liveTimer) clearInterval(bot.liveTimer); bot.liveTimer=setInterval(function(){ if(!document.hidden) sendLive(); }, 120000); }
 
 /* ---- FEEDBACK #40: customers call the office "מתי הנהג מגיע?". The office page shows where the route is: what was
    done and when, what is next, and an estimate per stop. Sent after every change and every 3 minutes while the app
@@ -1429,6 +1502,7 @@ function livePayload(pos){
     var nt=[st==='failed'?[r.safety,r.text].filter(Boolean).join(' — '):'',x.kind==='task'&&r.done?'בוצע: '+r.done:'', x.officeNote||''].filter(Boolean).join(' · ');
     if(nt) o.nt=nt.slice(0,300);
     if(x.dn) o.dn=dnNo(x.dn.no);
+    if(x.officePaid) o.op=1;
     return o; };
   var next=pend.map(function(x){ var o=row(x,'next'); o.d = prevPt && x.pt ? driveMin(prevPt,x.pt) : Math.max(3, avg-svc); prevPt=x.pt||null; return o; });
   return { day:dayOf(), phase:state.phase, driver:state.driver, journals:journalNos(), avg:avg, svc:svc, go:go?go.leftAt:0,
@@ -1446,14 +1520,33 @@ async function sendLive(closed){
 }
 /* never asks for permission here — only uses it if the driver already allowed location for the app */
 async function livePos(){
-  try{ if(navigator.permissions){ var st=await navigator.permissions.query({name:'geolocation'}); if(st.state!=='granted') return null; } }catch(e){ return null; }
+  var known=lsGet('gazgal-geo-ok',0);
+  try{ if(navigator.permissions && navigator.permissions.query){ var st=await navigator.permissions.query({name:'geolocation'}); if(st.state!=='granted') return null; } else if(!known) return null; }catch(e){ if(!known) return null; }
   /* high accuracy = the GPS itself. Without it the phone may answer from cell towers, hundreds of metres to kilometres off */
-  return new Promise(function(res){ try{ navigator.geolocation.getCurrentPosition(function(p){ res({lat:Math.round(p.coords.latitude*1e5)/1e5, lon:Math.round(p.coords.longitude*1e5)/1e5, acc:Math.round(p.coords.accuracy), at:p.timestamp||Date.now()}); },
+  return new Promise(function(res){ try{ navigator.geolocation.getCurrentPosition(function(p){ lsSet('gazgal-geo-ok',1); res({lat:Math.round(p.coords.latitude*1e5)/1e5, lon:Math.round(p.coords.longitude*1e5)/1e5, acc:Math.round(p.coords.accuracy), at:p.timestamp||Date.now()}); },
     function(){ res(null); }, {enableHighAccuracy:true, maximumAge:15000, timeout:20000}); }catch(e){ res(null); } });
 }
 
 /* ---- FEEDBACK #26: tomorrow's journal, sent by the office. It waits here; the driver loads it with one tap (#25). ---- */
 bot.journals=[]; bot.restore=null; bot.backupAt=0;
+async function pollEdits(){
+  if(!BOT_API || bot.status!=='active' || !state.stops.length) return;
+  try{ var r=await botFetch('/api/edits'); if(!r.ok) return; var es=(await r.json()).edits||[], ids=[], msgs=[];
+    es.forEach(function(e){ ids.push(e.id);
+      var s=state.stops.filter(function(x){ return String(x.orderNo||(x.hot?'':x.id))===String(e.o) && (!e.c || custNo(x)===e.c || !custNo(x)); })[0]; if(!s) return;
+      var at=new Date(e.at||Date.now()).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}), who=(e.by||'המשרד')+' '+at;
+      if(e.paid){ s.officePaid={a:e.paid.a||0, how:e.paid.how||'', by:who};
+        if(s.status==='pending'){ s.paidFlag=true; msgs.push('💳 '+s.name+' — שולם במשרד, לא גובים'); }
+        else msgs.push('⚠ '+s.name+' — המשרד רשם ששולם במשרד, אבל כבר סגרת את העצירה. לבדוק עם המשרד שלא נגבה פעמיים.'); }
+      if(e.note){ s.note=(s.note?s.note+' · ':'')+'משרד ('+who+'): '+e.note; msgs.push('📝 '+s.name+': '+e.note); }
+      if(e.cancel && s.status==='pending'){ s.status='failed'; s.items.forEach(function(i){ i.actual=0; });
+        s.result={reason:'בוטל במשרד', text:e.cancel+' ('+who+')', at:Date.now(), empties:{1:0,2:0}}; msgs.push('✕ '+s.name+' — בוטל במשרד'); }
+    });
+    if(!ids.length) return;
+    if(msgs.length){ save(); if(!document.querySelector('.scrim')) render(); toast(msgs.join(' · ')); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} }
+    await botFetch('/api/edits/ack',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:ids})});
+  }catch(e){}
+}
 async function pollMore(){
   if(!BOT_API || bot.status!=='active') return;
   try{
@@ -1462,7 +1555,7 @@ async function pollMore(){
   }catch(e){}
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
-  await pollRequests(); flushRequests(); if(bot.backupDirty) doBackup();
+  await pollRequests(); flushRequests(); pollEdits(); if(bot.backupDirty) doBackup();
   syncPlaces().then(syncStands); flushOutbox(); backfillOutbox(); syncTrucks(); syncFleet(); syncCountLog();
 }
 async function loadOfficeJournal(id){
@@ -1530,7 +1623,7 @@ async function pollRequests(){
     if(changed){ save(); if(!document.querySelector('.scrim')) render(); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} }
   }catch(e){}
 }
-document.addEventListener('visibilitychange',function(){ if(!document.hidden) pollInbox(); });
+document.addEventListener('visibilitychange',function(){ if(!document.hidden){ pollInbox(); if(state.phase==='route') sendLive(); } });
 /* FEEDBACK #64: on a phone that cannot install the app (Android Go) the browser may clear site data when space runs low — ask to keep it */
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function(ok){ if(!ok) navigator.storage.persist(); }); }catch(e){}
 async function botAck(status,result){
@@ -1664,7 +1757,7 @@ function badgePay(s){
   var md=mode(s), amt=money(totalOf(s,false));
   if(md==='collect') return '<div class="collect c-collect"><span>לגבות</span><span class="big num">'+amt+'</span></div>';
   if(md==='verify') return '<div class="collect c-verify"><span>לגבות?<small>'+(s.paidFlag?'':/שולם/.test(s.note||'')?'בהערה כתוב ״שולם״ — לוודא עם הלקוח':'לא מסומן כשולם — לוודא')+'</small></span><span class="big num">'+amt+'</span></div>';
-  if(md==='paid') return '<div class="collect c-paid"><span>שולם מראש</span><span>לא גובים</span></div>';
+  if(md==='paid') return '<div class="collect c-paid"><span>'+(s.officePaid?'💳 שולם במשרד'+(s.officePaid.a?' '+money(s.officePaid.a):'')+'<small>'+esc([s.officePaid.how,s.officePaid.by].filter(Boolean).join(' · '))+'</small>':'שולם מראש')+'</span><span>לא גובים</span></div>';
   if(md==='standing') return '<div class="collect c-credit"><span>הוראת קבע</span><span>לא גובים</span></div>';
   return '<div class="collect c-credit"><span>לקוח אשראי</span><span>לא גובים</span></div>';
 }
@@ -2074,7 +2167,7 @@ function docHtml(){
     g.stops.forEach(function(s){ rows+=orderRow(s); });
   });
   var p2='<div class="paper flow">'+docHead('נספח — פירוט הזמנות')+
-    '<table class="wide ord"><thead><tr><th rowspan="2">✓</th><th rowspan="2">שורה</th><th rowspan="2">הזמנה</th><th rowspan="2">צרכן</th><th rowspan="2">שם וכתובת</th><th colspan="2">הוזמן</th><th colspan="2">סופק</th><th colspan="2">ריקים</th><th rowspan="2">תשלום</th><th rowspan="2">הערה למשרד</th></tr>'+
+    '<table class="wide ord"><thead><tr><th rowspan="2">✓</th><th rowspan="2">שורה</th><th rowspan="2">הזמנה</th><th rowspan="2">צרכן</th><th rowspan="2">שם וכתובת</th><th colspan="2">הוזמן</th><th colspan="2">סופק</th><th colspan="2">ריקים</th><th rowspan="2">תשלום</th><th rowspan="2">הערה בהזמנה</th><th rowspan="2">הערה למשרד</th></tr>'+
     '<tr><th>12</th><th>48</th><th>12</th><th>48</th><th>12</th><th>48</th></tr></thead><tbody>'+rows+'</tbody></table>'+
     '<div class="foot"><span class="pg"></span><span>✓ = לסימון הפקידה · מודגש = שונה מההזמנה</span></div></div>';
   return p1+p2;
@@ -2099,7 +2192,7 @@ function orderRow(s){
     dl && r.loan && (r.loan[1]||r.loan[2]) ? 'החזיר מושאלים (פיקדון): '+[1,2].filter(function(k){ return r.loan[k]; }).map(function(k){ return r.loan[k]+'×'+(k===1?'12':'48'); }).join(', ') : '',
     dl && s.dn ? '🧾 ת״מ '+dnNo(s.dn.no)+(s.dn.signed?' — נחתמה':' — לא נחתמה (לא בבית)') : '', (s.dnVoid||[]).length ? 'ת״מ '+s.dnVoid.map(dnNo).join(', ')+' בוטלה' : '', s.officeNote||''].filter(Boolean).join(' · ');
   return '<tr'+(!dl?' class="warn2"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
-    '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(note)+'</td></tr>';
+    '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(s.note||'')+'</td><td>'+esc(note)+'</td></tr>';
 }
 function facLines(R){
   var L=[];
@@ -2273,9 +2366,19 @@ function prevCard(R){
       '<span class="r">סה״כ מיכלים</span>'+f('kt',tot(v,1),'סה״כ מיכלים 12')+f('gt',tot(v,2),'סה״כ מיכלים 48')+'</div>'+
     '<p class="hint">״סה״כ מיכלים״ = מלאים + ריקים על המשאית, כמו בשורה ״יתרות מיכלים ריקים״ בטופס.</p></section>';
 }
+function backupCard(){
+  var st=lsGet('gazgal-stand-dirty',[]).length, pl=placesDirty().length, dn=state.stops.filter(function(s){ return s.dn && s.dn.no && !s.dn.up; }).length;
+  var wait=st+pl+dn;
+  return '<section class="card"><h3>☁️ גיבוי בשרת</h3>'+
+    (wait ? '<p>⏳ ממתינים לעלות: '+[st?st+' תמונות עמדה':'', pl?pl+' מיקומי חנייה':'', dn?dn+' תעודות משלוח':''].filter(Boolean).join(' · ')+'</p><p class="hint">עולים לבד כשיש קליטה.</p><button type="button" class="btn btn-ghost btn-sm" id="backupNow">העלה עכשיו</button>'
+      : '<p style="margin:0">✓ כל תמונות העמדות, מיקומי החנייה ותעודות המשלוח שמורים בשרת — גם אם הטלפון נתקע או מוחלף.</p>')+'</section>'; }
+function dnListCard(){ var L=state.stops.filter(function(s){ return s.dn && s.dn.no; }); if(!L.length) return '';
+  return '<section class="card"><h3>🧾 תעודות המשלוח של היום ('+L.length+')</h3><div class="list">'+L.map(function(s){
+    return '<button type="button" class="li" data-sheet="dn" data-preset="'+esc(s.id)+'"><span class="n num">'+dnNo(s.dn.no)+'</span><div><div class="t">'+esc(s.name)+'</div><div class="s">'+
+      (s.dn.signed?'✍️ נחתמה':'🏠 בלי חתימה')+' · '+(s.dn.up?'📤 במשרד':(bot.status==='active'?'⏳ נשלחת למשרד':'לא מחובר למשרד'))+'</div></div></button>'; }).join('')+'</div></section>'; }
 function viewEnd(){
   var R=report();
-  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>סגירת יומן '+esc(journalNos().join(' + '))+'</h1></div>'+
+  return '<main><div class="hero"><span class="eyebrow">סוף יום</span><h1>סגירת יומן '+esc(journalNos().join(' + '))+'</h1></div>'+backupCard()+dnListCard()+
   (R.openStops.length?'<div class="note">נשארו '+R.openStops.length+' עצירות פתוחות. אפשר לסגור בכל זאת, והן יופיעו בדוח כ״לא טופלו״.</div>':'')+
   prevCard(R)+
   '<section class="card"><div class="sec" style="margin:0"><h3>ספירת סוף יום — המשאית</h3>'+(R.eve?'<span class="tag t-ok num">'+esc(R.eve.time)+'</span>':'')+'</div>'+
@@ -2582,8 +2685,9 @@ function openSheet(kind,preset){
         '<div class="field"><label for="chqDue" class="lbl">לפירעון (לא חובה)</label><input class="inp num" id="chqDue" type="date"></div></div>'+
         '<span class="lbl">צילום הצ׳ק (לא חובה)</span>'+photoPick('cheque','צלם צ׳ק')+
         '<p class="hint">צילום עוזר לפקידה ומגן כשצ׳ק חוזר, אבל אפשר לאשר גם בלעדיו.</p></div>'
-      : payer ? '' : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
-    '<div class="field"><span class="lbl">📍 מיקום חנייה'+(c.point?' — '+esc(c.point):'')+'</span><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(dpt?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
+      : payer ? '' : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':c.officePaid?'💳 שולם במשרד'+(c.officePaid.a?' '+money(c.officePaid.a):'')+' ('+esc(c.officePaid.by||'')+') — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
+    '<div class="field"><span class="lbl">📍 מיקום חנייה'+(c.point?' — '+esc(c.point):'')+'</span><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(dpt?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="mapPark">🗺 סמן על המפה</button></div>'+
       '<p class="hint" id="gpsMsg">'+(dpt?'יש מיקום שמור'+(dpt.name?' ('+esc(dpt.name)+')':'')+' מהפעם הקודמת.':'עומד בחנייה הנכונה? שמור, ובפעם הבאה Waze והסידור ישתמשו בו.')+'</p><div id="geoBox"></div></div>'+
     '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(parkOf(c))+'</textarea></div>'+
     '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
@@ -2860,7 +2964,7 @@ function confirmDeliver(){
     if(draft.geoMode==='replace' && ex){ ex.lat=draft.geo[0]; ex.lon=draft.geo[1]; ex.acc=draft.geoAcc; delete ex.auto; }
     else { var nm=c.point || gName; if(gOld && P.length && !P[0].name) P[0].name=gOld;
       var same=nm ? P.filter(function(x){ return x.name===nm; })[0] : null;
-      if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; same.acc=draft.geoAcc; delete same.auto; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1], acc:draft.geoAcc});
+      if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; same.acc=draft.geoAcc; delete same.auto; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1], acc:draft.geoAcc, src:draft.geoSrc||undefined});
       if(nm && P.length>1) c.point=nm; } }
   if(park){ var pp=c.point ? ptOf(c) : null; if(pp) pp.parking=park; else if(!c.point) state.memory[c.cust].parking=park; }
   if(park || draft.geo) touchPlace(c.cust);
@@ -2884,7 +2988,7 @@ function confirmSafety(){
   c.items.forEach(function(i){ i.actual=0; }); c.status='failed';
   c.result={at:Date.now(), reason:SAFETY, safety:draft.safety, text:txt, empties:{1:0,2:0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   if(draft.safetyImg){ photos['s-'+c.id]=draft.safetyImg; savePhotos(); }
-  save(); render();
+  c.result.safeUp=false; save(); render(); setTimeout(flushSafety, 500);
   /* the next step is to tell the office right away: WhatsApp with the details, or a call */
   document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נרשם ✓ — עכשיו למשרד</h2><div class="msg">'+esc(safetyMsg(c))+'</div>'+
     '<a class="btn btn-bad linkbtn" href="https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(safetyMsg(c))+'" target="_blank" rel="noopener">💬 שלח למשרד בוואטסאפ</a>'+
@@ -2993,12 +3097,30 @@ function issueDn(){
   var c=byId(draft.stop); if(!c || c.dn) return;
   var nh=draft.dnNoSig, note=(document.getElementById('dnNote').value||'').trim();
   if(!nh && !(sig && sig.drawn)){ showErr('dnErr','הלקוח עוד לא חתם. לא בבית? בחר ״בלי חתימה״.'); return; }
-  c.dn={no:dnNext(), at:Date.now(), signed:!nh, signer:nh?'':(document.getElementById('dnName').value||'').trim(), note:note};
+  c.dn={no:dnNext(), at:Date.now(), signed:!nh, signer:nh?'':(document.getElementById('dnName').value||'').trim(), note:note, up:false};
   if(!nh){ photos['sig-'+c.id]=sig.cv.toDataURL('image/png'); savePhotos(); }
   sig=null; save(); render();
   document.querySelector('.sheet').innerHTML='<div class="grab"></div>'+dnDoneHtml(c); layoutDn();
   toast('🧾 תעודת משלוח '+dnNo(c.dn.no)+' הופקה');
+  setTimeout(flushDns, 1500);
 }
+/* FEEDBACK #92: a safety problem goes to the office's "to handle" list — once; without signal, later */
+async function flushSafety(){
+  if(!BOT_API || bot.status!=='active') return;
+  var todo=state.stops.filter(function(s){ return s.result && s.result.reason===SAFETY && s.result.safeUp===false; });
+  for(var i=0;i<todo.length;i++){ var c=todo[i], r=c.result;
+    try{ var x=await botFetch('/api/safety',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({id:String(c.id)+'-'+(r.at||0), name:c.name, cust:custNo(c), addr:addr(c), city:c.city, safety:r.safety, text:r.text, day:dayOf(), order:c.orderNo||''})});
+      if(!x.ok) break; r.safeUp=true; save(); }catch(e){ break; } } }
+/* FEEDBACK #82/#91: every issued note goes to the office as a PDF (with the signature) — once; without signal, later */
+var dnBusy=false;
+async function flushDns(){
+  if(dnBusy || !BOT_API || bot.status!=='active') return; dnBusy=true;
+  try{ var todo=state.stops.filter(function(s){ return s.dn && s.dn.no && !s.dn.up; });
+    for(var i=0;i<todo.length;i++){ var c=todo[i], blob=await dnPdf(c), e=function(v){ return encodeURIComponent(String(v||'')); };
+      var r=await botFetch('/api/dn/file/'+c.dn.no,{method:'POST', headers:{'content-type':'application/pdf', 'x-dn-name':e(c.name), 'x-dn-cust':e(custNo(c)), 'x-dn-city':e(c.city), 'x-dn-day':e(dayOf()), 'x-dn-signed':c.dn.signed?'1':'0'}, body:blob});
+      if(!r.ok) break; c.dn.up=true; save(); }
+  }catch(e){}
+  dnBusy=false; }
 function dnMobile(c){ return contacts(c).filter(function(x){ return /^05/.test(x.num); })[0] || null; }
 function dnDoneHtml(c){
   var mob=dnMobile(c);
@@ -3403,11 +3525,16 @@ document.addEventListener('click',function(ev){
       if(acc>40){ draft.geo=null; draft.geoCand={pos:pos, acc:acc};
         gm.innerHTML = acc<=150
           ? '⚠ הדיוק ±'+acc+' מ׳ — פחות מהרגיל. <button type="button" class="linkish" data-geoforce="1" style="display:inline;min-height:0;padding:2px 8px">שמור בכל זאת</button> או לחץ שוב לנסות.'
-          : '⚠ לא נשמר: הדיוק ±'+acc+' מ׳ (כנראה מיקום לפי אנטנות, לא GPS). צא מהרכב, מתחת לשמיים פתוחים, ולחץ שוב.';
+          : acc>=1000
+            /* FEEDBACK #89: ±1–2 km every time = the browser has only "approximate location" (Android 12+) */
+            ? '⚠ לא נשמר: הדיוק ±'+acc+' מ׳. <b>כנראה לדפדפן מותר רק מיקום משוער.</b> בהגדרות הטלפון: אפליקציות ← '+(/SamsungBrowser/.test(navigator.userAgent)?'Samsung Internet':'Chrome')+' ← הרשאות ← מיקום ← להפעיל <b>״השתמש במיקום מדויק״</b>, ולחזור לכאן.'
+            : '⚠ לא נשמר: הדיוק ±'+acc+' מ׳ (כנראה מיקום לפי אנטנות, לא GPS). צא מהרכב, מתחת לשמיים פתוחים, ולחץ שוב.';
         gm.style.color='var(--bad)'; return; }
       acceptGeo(pos, acc); })
     .catch(function(e){ gm.textContent = e && e.message==='denied' ? 'אין הרשאת מיקום. בהגדרות הטלפון: מיקום דולק, והדפדפן מורשה להשתמש בו.' : 'לא התקבל GPS תוך 25 שניות. צא מהרכב, מתחת לשמיים פתוחים, ולחץ שוב.'; gm.style.color='var(--bad)'; });
     return; }
+  if(t.id==='backupNow'){ toast('מעלה…'); syncPlaces().then(syncStands).then(function(){ try{ flushDns(); }catch(e){} setTimeout(function(){ render(); }, 2500); }); return; }
+  if(t.id==='mapPark'){ var mc=draft && byId(draft.stop); if(mc) mapPick(mc); return; }
   if(ds.geoforce){ var cand=draft && draft.geoCand; if(cand){ acceptGeo(cand.pos, cand.acc); delete draft.geoCand; } return; }
   if(t.id==='goRoute'){ startRoute(false); return; }
   if(t.id==='goManual'){ startRoute(true); return; }
