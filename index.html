@@ -201,6 +201,9 @@ td.v,th.v{text-align:end}
 .paper .ord td:last-child{width:150px}
 .paper .ord .ad{font-size:10px;font-weight:400;color:#333}
 .paper .ord td.chg{font-weight:800;text-decoration:underline;font-size:13px}
+.paper .ord tr.chgrow td{background:#ffe08a;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.paper .ord tr.chgrow td.nm{box-shadow:inset -5px 0 0 #c0392b}
+.paper .f4{display:inline-block;background:#c0392b;color:#fff;font-weight:800;border-radius:4px;padding:1px 6px;margin-bottom:2px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .paper .grp td{background:#e6e6e6;font-weight:700;text-align:start}
 .paper .warn2{font-weight:700}
 .paper .sig{display:grid;grid-template-columns:1fr 1fr;gap:10px 30px;margin-top:10px}
@@ -2233,8 +2236,9 @@ function orderRow(s){
     s.kind==='task' ? '🛠 מטלה: '+(s.task||'')+(s.fake?' — הזמנה פיקטיבית, לא סופק גז':'')+(dl && r.done?' · בוצע: '+r.done:'') : '',
     dl && r.loan && (r.loan[1]||r.loan[2]) ? 'החזיר מושאלים (פיקדון): '+[1,2].filter(function(k){ return r.loan[k]; }).map(function(k){ return r.loan[k]+'×'+(k===1?'12':'48'); }).join(', ') : '',
     dl && s.dn ? '🧾 ת״מ '+dnNo(s.dn.no)+(s.dn.signed?' — נחתמה':' — לא נחתמה (לא בבית)') : '', (s.dnVoid||[]).length ? 'ת״מ '+s.dnVoid.map(dnNo).join(', ')+' בוטלה' : '', s.officeNote||''].filter(Boolean).join(' · ');
-  return '<tr'+(!dl?' class="warn2"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
-    '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(s.note||'')+'</td><td>'+esc(note)+'</td></tr>';
+  var f4=changed(s);   /* FEEDBACK #111 (יוני + זיוה 14/10): ordered one thing, supplied another — the office cancels and re-issues (F4) */
+  return '<tr'+(!dl?' class="warn2"':f4?' class="chgrow"':'')+'><td class="c"></td><td class="c num">'+(s.row && s.row<999?s.row:'')+'</td><td class="c num">'+esc(s.orderNo||(s.hot?'':s.id))+'</td><td class="c num">'+esc(custNo(s))+'</td>'+
+    '<td class="nm">'+esc(s.name)+'<div class="ad">'+esc(addr(s))+', '+esc(s.city)+'</div></td>'+cell(qtyOf(s,'1',false))+cell(qtyOf(s,'2',false))+sup+emp+'<td>'+pay+'</td><td>'+esc(s.note||'')+'</td><td>'+(f4?'<span class="f4">⚠ סופק שונה מההזמנה — ביטול + F4</span><br>':'')+esc(note)+'</td></tr>';
 }
 function facLines(R){
   var L=[];
