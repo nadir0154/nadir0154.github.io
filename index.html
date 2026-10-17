@@ -58,6 +58,20 @@ button{cursor:pointer}
 .topbar .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 .topbar .j{font-size:13px;color:var(--nav-muted);font-weight:600}
 .topbar .cash{font-family:var(--display);font-size:20px}
+.topbar{gap:6px}
+.topbar .tb1{align-items:center}
+.topbar .prog{font-size:19px;font-weight:800;letter-spacing:.2px}
+.topbar .sosb{font:inherit;font-size:15px;font-weight:800;min-height:48px;padding:0 16px;border-radius:999px;border:2px solid #ff8f80;background:rgba(255,90,70,.16);color:#fff;cursor:pointer}
+.topsub{background:var(--nav);color:var(--nav-ink);padding:2px 16px 12px;display:grid;gap:8px}
+.topsub .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.topsub .j{font-size:13px;color:var(--nav-muted);font-weight:600}
+.topsub .cash{font-family:var(--display);font-size:20px}
+.topsub .cash small{font-family:var(--body);font-size:12px;color:var(--nav-muted);font-weight:600;margin-inline-start:6px}
+.topsub .tb2{flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:8px}
+.topsub .ctx{font:inherit;font-size:14px;font-weight:800;min-height:48px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.35);background:transparent;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.topsub .ctx.acc{background:var(--accent);border-color:var(--accent);color:var(--accent-ink,#fff)}
+.topsub .ctx.wait{border-color:#ffd166;color:#ffd166}
+.topsub .tb2 .cash{margin-inline-start:auto}
 .topbar .cash small{font-family:var(--body);font-size:12px;color:var(--nav-muted);font-weight:600;margin-inline-start:6px}
 .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
@@ -113,7 +127,6 @@ h1,h2,h3{margin:0;text-wrap:balance}
 .tab{background:transparent;border:0;color:var(--nav-muted);font-weight:800;font-size:14px;min-height:54px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
 .tab b{font-size:19px}
 .tab[aria-current="page"]{color:var(--nav-ink);background:rgba(255,255,255,.08)}
-.fab{position:fixed;z-index:31;bottom:calc(80px + env(safe-area-inset-bottom,0px));inset-inline-end:max(16px,calc(50% - 244px));min-height:52px;padding:0 18px;border-radius:999px;background:var(--accent);color:var(--accent-ink);border:0;font-size:17px;font-weight:800;box-shadow:var(--shadow)}
 .scrim{position:fixed;inset:0;background:rgba(8,12,17,.5);z-index:40;display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--bg);width:100%;max-width:520px;max-height:92%;overflow:auto;border-radius:18px 18px 0 0;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));display:grid;gap:14px}
 .sheet .grab{width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
@@ -334,7 +347,7 @@ function migrate(s){
   return s;
 }
 function load(){ try{ var r=localStorage.getItem(KEY); if(r){ var s=JSON.parse(r); if(s && s.stops) return migrate(s); } }catch(e){} return migrate(fresh()); }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} if(typeof scheduleBackup==='function') scheduleBackup(); if(typeof scheduleLive==='function') scheduleLive(); }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); save.ok=true; }catch(e){ save.ok=false; } if(typeof scheduleBackup==='function') scheduleBackup(); if(typeof scheduleLive==='function') scheduleLive(); }
 state = load();
 save();   /* pins the work day of a day that started on an older version */
 var prices={}; try{ prices=JSON.parse(localStorage.getItem('gazgal-prices')||'{}')||{}; }catch(e){ prices={}; }
@@ -662,7 +675,7 @@ async function syncFleet(sendOnly){
         if(!r.ok) throw 0;
         if(it.photo){ var b=await (await fetch(it.photo)).blob(), pr=await botFetch('/api/fleet/photo/'+it.id,{method:'POST', headers:{'content-type':b.type||'image/jpeg'}, body:b}); if(!pr.ok) throw 0; }
       }catch(e){ left=q.slice(i); break; } }
-    await idbPut('kv','fleetOut',left);
+    await idbPut('kv','fleetOut',left); pokeWait();
     if(!sendOnly && (!bot.fleetAt || Date.now()-bot.fleetAt>10*60000)){ var g=await botFetch('/api/fleet'); if(g.ok){ lsSet('gazgal-fleet', await g.json()); bot.fleetAt=Date.now(); } }
   }catch(e){}
   fleetBusy=false;
@@ -1747,13 +1760,34 @@ function inboxHtml(){
 
 /* ================= pieces ================= */
 function firstName(){ return (state.driver||'').split(' ')[0] || ''; }
+/* UX stage 0 (docs/driver-ux/REVIEW.md §3): two fixed things — where I am in the day, and 🆘 — and a row of what matters
+   now: "+ הזמנה" during the route (it used to float over the Waze button), what is still waiting to reach the office,
+   messages, the cash, "⋯ עוד". Nothing was removed: the journal line, the phase and the truck line are still here. */
+var waitIdb=0, waitAt=0;
+function pokeWait(){ waitAt=0; refreshWait(); }
+function refreshWait(){ if(Date.now()-waitAt<5000) return; waitAt=Date.now();
+  Promise.all([outbox().catch(function(){ return []; }), idbGet('kv','fleetOut').catch(function(){ return []; })]).then(function(r){
+    var n=(r[0]||[]).length+((r[1])||[]).length;
+    if(n!==waitIdb){ waitIdb=n; if(!document.querySelector('.scrim')) render(); } }); }
+function pendingSend(){ if(typeof bot==='undefined' || !BOT_API || bot.status!=='active') return 0;
+  var n=waitIdb+lsGet('gazgal-stand-dirty',[]).length+placesDirty().length;   /* day reports + fleet (IndexedDB) + photos, places, notes, safety, approvals */
+  state.stops.forEach(function(x){ if(x.dn && x.dn.no && !x.dn.up) n++; if(x.result && x.result.safeUp===false) n++; if(x.needsOk && !x.reqSent) n++; });
+  return n; }
 function topbar(){
-  var d=done().length, n=state.stops.length, t=cashTotals();
+  var d=done().length, n=state.stops.length, t=cashTotals(), w=pendingSend(), onRoute=state.phase==='route' && cur();
+  var prog = !n ? (state.source==='none' ? 'אין יומן' : '0 עצירות') : onRoute ? 'עצירה '+Math.min(d+1,n)+' מתוך '+n : state.phase==='morning' ? n+' עצירות · לפני יציאה' : d+' מתוך '+n+' הושלמו';
   return (state.source==='sample' ? '<div class="demo">יומן לדוגמה · הנתונים מומצאים. ייבא את היומן שלך מבש״ן כדי להתחיל.</div>' : '')+
-  '<header class="topbar"><div class="row"><span class="j">'+(state.source==='none' ? 'אין יומן טעון' : 'יומן '+esc(state.activeJ||state.journal)+(state.activeJ?' (מסונן)':state.journals.length>1?' +'+(state.journals.length-1):''))+' · '+esc(state.day||state.date)+(state.driver?' · '+esc(state.driver):'')+'</span>'+
-  '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
-  '<div class="row"><span class="num" style="font-weight:800">'+d+' / '+n+' עצירות</span><span style="display:flex;gap:10px;align-items:center"><button type="button" data-sheet="sos" aria-label="חירום — מספרים ונוהל" style="font:inherit;font-size:13px;font-weight:800;border:1px solid rgba(255,255,255,.35);background:transparent;color:inherit;border-radius:999px;padding:2px 10px;min-height:30px">🆘</button>'+inboxBtn()+'<span class="j">'+(state.phase==='morning'?'לפני יציאה':'בסבב')+'</span></span></div>'+
-  '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div>'+truckLine()+'</header>';
+  '<header class="topbar"><div class="row tb1"><span class="prog num">'+prog+'</span>'+
+    '<button type="button" class="sosb" data-sheet="sos" aria-label="חירום — מספרים ונוהל">🆘 חירום</button></div>'+
+  '<div class="bar" aria-hidden="true"><i style="width:'+(n?Math.round(d/n*100):0)+'%"></i></div></header>'+
+  '<div class="topsub">'+
+  '<div class="row tb2">'+
+    (onRoute && state.view==='route' ? '<button type="button" class="ctx acc" data-sheet="hot">+ הזמנה</button>' : '')+
+    (w ? '<button type="button" class="ctx wait" data-sheet="more">⏳ '+w+' ממתינות לשליחה</button>' : '')+
+    inboxBtn()+'<button type="button" class="ctx" data-sheet="more">⋯ עוד</button>'+
+    '<span class="cash num">'+money(t.cash+t.cheque)+'<small>בקופה</small></span></div>'+
+  '<div class="row"><span class="j">'+(state.source==='none' ? 'אין יומן טעון' : 'יומן '+esc(state.activeJ||state.journal)+(state.activeJ?' (מסונן)':state.journals.length>1?' +'+(state.journals.length-1):'')+' · '+esc(state.day||state.date)+(state.driver?' · '+esc(state.driver):''))+'</span>'+
+    '</div>'+truckLine()+'</div>';
 }
 function inboxBtn(){
   if(!BOT_API || bot.status!=='active') return '';
@@ -2383,7 +2417,7 @@ async function flushOutbox(){
     }
     await idbPut('kv','outbox', ob.filter(function(x){ return !x.sent && !x.gone; }));
   }catch(e){}
-  flushing=false;
+  flushing=false; pokeWait();
 }
 function migrateRec(rec){ rec.day=migrate(rec.day); return rec; }
 async function sharePdf(){
@@ -2515,10 +2549,10 @@ async function restoreArchive(){
 function navbar(){
   var v = state.view==='stock' ? 'stock' : state.view==='cash' ? 'cash' : (state.view==='doc'||state.view==='history') ? 'end' : (state.phase==='morning' ? 'route' : state.view);
   function tab(k,ic,l){ return '<button class="tab" type="button" data-view="'+k+'"'+(v===k?' aria-current="page"':'')+'><b>'+ic+'</b>'+l+'</button>'; }
-  return (state.phase==='route' && v==='route' && cur() ? '<button class="fab" type="button" data-sheet="hot">+ הזמנה חמה</button>' : '')+
-  '<nav class="nav" aria-label="ניווט"><div class="in">'+tab('route','🚚','סבב')+tab('stock','📦','מלאי')+tab('cash','💵','קופה')+tab('end','📋','סוף יום')+'</div></nav>';
+  return '<nav class="nav" aria-label="ניווט"><div class="in">'+tab('route','🚚','סבב')+tab('stock','📦','מלאי')+tab('cash','💵','קופה')+tab('end','📋','סוף יום')+'</div></nav>';
 }
 function render(){
+  refreshWait();
   var v=state.view;
   var body = v==='stock' ? viewStock() : v==='history' ? viewHistory() : v==='doc' ? viewDoc() : v==='cash' ? viewCash() : state.phase==='morning' ? viewMorning() : v==='end' ? viewEnd() : viewRoute();
   document.getElementById('app').innerHTML = topbar()+body+navbar();
@@ -2565,6 +2599,8 @@ function refreshAmt(){
 }
 function openSheet(kind,preset){
   var c=(preset && byId(preset)) || cur(), html='';
+  sheetKind=kind; sheetPreset=preset||''; sheetStop=(STOP_KINDS.indexOf(kind)>=0 && c) ? c.id : '';
+  if((kind==='deliver'||kind==='fail') && c) metricsCur={stop:c.id, openAt:Date.now(), taps:0, errs:0};
   if(kind==='count'){
     var pr=(preset||'').split('|'), pt=pr[0]||ME(), mo=pr[1]||nextMoment(pt);
     draft={point:pt, pointText:'', moment:mo, v:{}, plate:myPlate()};
@@ -2678,6 +2714,15 @@ function openSheet(kind,preset){
   if(kind==='fuel'){ html=fuelSheet(); }
   if(kind==='fault'){ html=faultSheet(); }
   if(kind==='sos'){ html=sosSheet(); }
+  if(kind==='more'){ html='<h2>⋯ עוד</h2>'+
+    '<div class="field"><label style="display:flex;gap:10px;align-items:center;font-weight:700"><input type="checkbox" id="uiFull"'+(uiFullOn()?' checked':'')+' style="width:24px;height:24px"> תצוגה מלאה (כמו היום)</label>'+
+      '<p class="hint" style="margin:0">בשלבים הבאים יגיעו מסכים פשוטים יותר. מי שרוצה את המסכים המלאים — משאיר את זה מסומן. נשמר בגיבוי של היום.</p></div>'+
+    backupCard()+botCard()+
+    '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-sheet="metrics">📈 מדדים (בטלפון בלבד)</button>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>'; }
+  if(kind==='metrics'){ html='<h2>📈 מדדים</h2><p class="hint">זמן, לחיצות ושגיאות לכל עצירה — להשוואת לפני/אחרי. נשמר רק בטלפון, לא נשלח למשרד.</p>'+
+    '<div id="mxBody">טוען…</div><button class="btn btn-ghost btn-sm" type="button" id="mxCopy">העתק JSON</button><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>'; }
   if(kind==='pastecounts'){ html=pasteSheet(); }
   if(kind==='deliver' && c && c.kind==='task'){ html=taskDoneSheet(c); kind=''; }
   if(kind==='task'){ html=newTaskSheet(preset==='pickup'); }
@@ -2810,12 +2855,87 @@ function openSheet(kind,preset){
   }
   document.getElementById('sheetRoot').innerHTML='<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>'+html+'</div></div>';
   if(kind==='count') updateCountMsg();
+  if(kind==='metrics') fillMetrics();
   if(kind==='office' && officeIn && officeIn.blob) runOffice();
   if(kind==='pair') pairStart();
   if(kind==='dn' && c){ if(c.dn) layoutDn(); else initSig(); }
 }
-function closeSheet(){ document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null; }
-function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; }
+function closeSheet(){ sheetKind=''; sheetPreset=''; sheetStop=''; metricsCur=null; clearResume(); document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null; }
+function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; if(metricsCur) metricsCur.errs++; }
+/* UX stage 0, REVIEW.md §8: a sheet that was open when the phone rang, Waze took over or the browser was closed comes
+   back as it was. What is kept (localStorage, at most 40 KB, 12 hours, same app version only): WHICH sheet, for WHICH stop,
+   the draft and the typed values — never the sheet's markup. On restore the sheet is REBUILT by the same code (so prices
+   and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
+   A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
+   confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
+var APP_VER='3.16', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
+var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
+function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
+function fldKey(e,counts){ if(e.id) return '#'+e.id; var sig=e.tagName+':'+JSON.stringify(e.dataset||{}); counts[sig]=(counts[sig]||0)+1; return sig+':'+counts[sig]; }
+function saveResume(){ var sh=document.querySelector('#sheetRoot .sheet');
+  if(!sh || RESUME_KINDS.indexOf(sheetKind)<0) return;
+  if(save.ok===false){ try{ localStorage.removeItem(RESUME_LS); }catch(e){} save(); if(save.ok===false) return; }   /* the state comes first */
+  var fc={}, fields=[]; sh.querySelectorAll('input,textarea,select').forEach(function(e){ if(e.type==='file') return; var k=fldKey(e,fc);
+    if(e.type==='checkbox'||e.type==='radio') fields.push({k:k, c:e.checked?1:0}); else fields.push({k:k, v:e.value}); });
+  var pc={}, pressed=[]; sh.querySelectorAll('[aria-pressed]').forEach(function(b){ var k=fldKey(b,pc); if(b.getAttribute('aria-pressed')==='true') pressed.push(k); });
+  var hid=[]; sh.querySelectorAll('[id]').forEach(function(e){ hid.push({id:e.id, h:e.hidden?1:0}); });
+  var outs=[]; sh.querySelectorAll('[id^="o-"]').forEach(function(e){ outs.push({id:e.id, t:e.textContent}); });   /* the +/- counters are spans, not inputs */
+  var img=false, d={}; try{ d=JSON.parse(JSON.stringify(draft||{}, function(k,v){ if(typeof v==='string' && (v.slice(0,5)==='data:'||v.slice(0,5)==='blob:')){ img=true; return undefined; } return v; })); }catch(e){}
+  var str=JSON.stringify({v:APP_VER, at:Date.now(), kind:sheetKind, preset:sheetPreset||'', stop:sheetStop||'', draft:d, fields:fields, pressed:pressed, hid:hid, outs:outs, img:img});
+  if(str.length>40000){ clearResume(); return; }   /* heavier than that — no resume, and no STALE one either */
+  try{ localStorage.setItem(RESUME_LS, str); }catch(e){ /* storage full — no resume */ } }
+function resumeSoon(){ if(!sheetKind) return; clearTimeout(resumeT); resumeT=setTimeout(saveResume, 400); }
+['input','change','click'].forEach(function(ev){ document.addEventListener(ev,function(e){ if(e.target && e.target.closest && e.target.closest('#sheetRoot .sheet')) resumeSoon(); }, true); });
+window.addEventListener('pagehide', function(){ try{ saveResume(); }catch(e){} });
+document.addEventListener('visibilitychange', function(){ if(document.hidden) try{ saveResume(); }catch(e){} });
+function restoreSheet(){ var o=lsGet(RESUME_LS,null); if(!o || !o.kind) return;
+  if(o.v!==APP_VER){ clearResume(); toast('האפליקציה התעדכנה — פתח שוב את מה שהיה פתוח'); return; }
+  if(Date.now()-(o.at||0)>12*3600e3){ clearResume(); return; }
+  if(STOP_KINDS.indexOf(o.kind)>=0){ var st=o.stop && byId(o.stop);
+    if(!st || st.status!=='pending'){ clearResume(); if(st) toast('⚠ העצירה של '+st.name+' עודכנה בינתיים — מה שהוקלד לא שוחזר'); return; } }
+  try{
+    openSheet(o.kind, (STOP_KINDS.indexOf(o.kind)>=0 ? o.stop : o.preset)||undefined);
+    var sh=document.querySelector('#sheetRoot .sheet'); if(!sh){ clearResume(); return; }
+    draft=Object.assign({}, draft||{}, o.draft||{});
+    (o.hid||[]).forEach(function(x){ var e=document.getElementById(x.id); if(e && sh.contains(e)) e.hidden=!!x.h; });
+    var pc={}, pmap={}; sh.querySelectorAll('[aria-pressed]').forEach(function(b){ pmap[fldKey(b,pc)]=b; });
+    Object.keys(pmap).forEach(function(k){ pmap[k].setAttribute('aria-pressed', (o.pressed||[]).indexOf(k)>=0 ? 'true' : 'false'); });
+    var fc={}, fmap={}; sh.querySelectorAll('input,textarea,select').forEach(function(e){ if(e.type==='file') return; fmap[fldKey(e,fc)]=e; });
+    (o.fields||[]).forEach(function(f){ var e=fmap[f.k]; if(!e) return; if('c' in f) e.checked=!!f.c; else e.value=f.v; });
+    (o.outs||[]).forEach(function(x){ var e=document.getElementById(x.id); if(e && sh.contains(e)) e.textContent=x.t; });
+    try{ if(o.kind==='deliver' && typeof refreshAmt==='function') refreshAmt(); }catch(e){}
+    if(document.getElementById('sigPad')) initSig(); if(o.kind==='count') updateCountMsg();
+    toast('↩ המשכת מאיפה שעצרת'+(o.img?' — צלם שוב את התמונה':''));
+  }catch(e){ clearResume(); } }
+/* only the driver himself may write onto a stop that is still pending — not a restored sheet of a stop the office
+   cancelled or another re-order moved (Jarvis's review: a double delivery) */
+/* the switch lives in localStorage (so the day close, which rebuilds state, cannot wipe it) AND in state (so it rides
+   the backup to a new phone) — each write stamps the time, the newer of the two wins. lsGet's ||default swallows a
+   stored false, hence the dedicated reader. */
+function uiFullOn(){
+  var loc=null; try{ var raw=localStorage.getItem('gazgal-ui-full'); if(raw!==null) loc = raw==='true' ? {v:true, at:0} : raw==='false' ? {v:false, at:0} : JSON.parse(raw); }catch(e){ loc=null; }
+  var stv = typeof state.uiFull==='boolean' ? {v:state.uiFull, at:state.uiFullAt||0} : null;
+  if(loc && stv) return (loc.at>=stv.at ? loc : stv).v;
+  if(loc) return !!loc.v; if(stv) return !!stv.v; return true;
+}
+function pendGuard(){ var c = draft && draft.stop ? byId(draft.stop) : cur();   /* never a fallback to another stop */
+  if(!c || c.status!=='pending'){ closeSheet(); render(); toast('⚠ העצירה כבר עודכנה בינתיים — בדוק אותה ברשימה'); return null; } return c; }
+/* UX stage 0, REVIEW.md §9: time, taps and errors per stop — on the phone only (IndexedDB), not in the report, not sent.
+   The clock restarts whenever the sheet is opened, taps count only while a sheet is open, at most 400 rows a day. */
+var metricsCur=null;
+function metricsAdd(rec){ var day=dayOf(); idbGet('kv','metrics').then(function(m){ m=m||{}; var a=(m[day]=m[day]||[]);
+  if(a.length<400) a.push(Object.assign({at:Date.now()}, rec));
+  var days=Object.keys(m).sort(); while(days.length>14) delete m[days.shift()]; return idbPut('kv','metrics',m); }).catch(function(){}); }
+function metricsDone(stopId){ var c=stopId && byId(stopId); if(!metricsCur || metricsCur.stop!==stopId || !c || c.status==='pending') return;
+  metricsAdd({stop:stopId, kind:c.status, leftAt:c.leftAt||0, openAt:metricsCur.openAt, doneAt:(c.result&&c.result.at)||Date.now(), taps:metricsCur.taps, errs:metricsCur.errs}); metricsCur=null; }
+document.addEventListener('click',function(){ if(metricsCur && document.querySelector('#sheetRoot .sheet')) metricsCur.taps++; }, true);
+function fillMetrics(){ idbGet('kv','metrics').then(function(m){ var el=document.getElementById('mxBody'); if(!el) return; m=m||{};
+  var days=Object.keys(m).sort().reverse(); if(!days.length){ el.innerHTML='<p class="muted" style="margin:0">עוד אין נתונים — הם נאספים מהעצירה הבאה.</p>'; return; }
+  el.innerHTML='<table style="width:100%;font-size:14px"><tr><th>יום</th><th>עצירות</th><th>חציון שנ׳</th><th>לחיצות</th><th>שגיאות</th><th>תוקנו</th></tr>'+days.map(function(d){ var a=m[d], done=a.filter(function(x){ return x.doneAt; });
+    var secs=done.map(function(x){ return Math.round((x.doneAt-x.openAt)/1000); }).sort(function(x,y){ return x-y; });
+    return '<tr><td>'+esc(d)+'</td><td class="c num">'+done.length+'</td><td class="c num">'+(secs.length?secs[Math.floor(secs.length/2)]:'—')+'</td><td class="c num">'+done.reduce(function(t,x){ return t+(x.taps||0); },0)+'</td><td class="c num">'+done.reduce(function(t,x){ return t+(x.errs||0); },0)+'</td><td class="c num">'+a.filter(function(x){ return x.reopen; }).length+'</td></tr>'; }).join('')+'</table>';
+  window.__mx=m; }).catch(function(){}); }
 function press(sel,t){ document.querySelectorAll(sel).forEach(function(b){ b.setAttribute('aria-pressed', b===t ? 'true' : 'false'); }); }
 function after(msg){ save(); closeSheet(); render(); window.scrollTo(0,0); if(msg) toast(msg); }
 
@@ -2900,7 +3020,9 @@ function splitSheet(s){
     '<button class="btn btn-accent" type="button" data-splitgo="1">פצל</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
 function applySplit(){
-  var s=byId(draft.split), n1=(document.getElementById('spN1').value||'').trim(), n2=(document.getElementById('spN2').value||'').trim();
+  var s=byId(draft.split);   /* the split sheet keeps its stop in draft.split, not draft.stop */
+  if(!s || s.status!=='pending'){ closeSheet(); render(); toast('⚠ העצירה כבר עודכנה בינתיים — בדוק אותה ברשימה'); return; }
+  var n1=(document.getElementById('spN1').value||'').trim(), n2=(document.getElementById('spN2').value||'').trim();
   var moved=Object.keys(draft.mv).reduce(function(t,k){ return t+draft.mv[k]; },0);
   if(!n1 || !n2){ showErr('spErr','תן שם לשתי הנקודות.'); return; }
   if(n1===n2){ showErr('spErr','שתי הנקודות באותו שם — שנה אחת מהן.'); return; }
@@ -2951,7 +3073,8 @@ function mergedStop(s){
   return Object.assign({}, s, {items:items, status:st, result:res, splitNote:note, officeNote:parts.map(function(p){ return p.officeNote; }).filter(Boolean).join(' · ')});
 }
 function confirmDeliver(){
-  var c=byId(draft.stop)||cur(), total=Object.keys(draft.q).reduce(function(t,k){ return t+(/^dep/.test(k)?0:(draft.q[k]||0)); },0);
+  var c=pendGuard(); if(!c) return;
+  var total=Object.keys(draft.q).reduce(function(t,k){ return t+(/^dep/.test(k)?0:(draft.q[k]||0)); },0);
   /* FEEDBACK #59: no gas, only empties collected (e.g. a loaned cylinder the customer owed) — saved, no payment needed */
   var back=(draft.e[1]||0)+(draft.e[2]||0)+(draft.loan[1]||0)+(draft.loan[2]||0), pickOnly=!total && back>0;
   if(!total && !back){ showErr('dErr','לא סומנה כמות. רק אספת ריקים? סמן אותם ב״ריקים שנאספו״ או ב״החזיר מיכלים מושאלים״. לא היה כלום — ״לא סופק״.'); return; }
@@ -3018,7 +3141,9 @@ function confirmDeliver(){
   if(draft.stand || draft.cheque) savePhotos();
   if(!draft.geo && !ptOf(c) && !/^hot-/.test(c.cust) && c.pt && /רחוב|יישוב/.test(c.geoHow||'')) learnPlace(c);
   var wantDn=draft.wantDn;
+  metricsDone(c.id);   /* the stop is written — the measurement is real */
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : '')+(disc?' · עם הנחה':''));
+  return true;
   if(wantDn) openSheet('dn', c.id);
 }
 function safetyMsg(s){
@@ -3027,15 +3152,18 @@ function safetyMsg(s){
     'נמצא: '+r.safety+(r.text?' — '+r.text:'')+'\nנא לתאם טכנאי ללקוח. — '+(state.driver||'הנהג');
 }
 function confirmSafety(){
+  var c=pendGuard(); if(!c) return;
   touchDay();
-  var c=byId(draft.stop)||cur(), txt=(document.getElementById('safTxt').value||'').trim();
+  var txt=(document.getElementById('safTxt').value||'').trim();
   if(!draft.safety){ showErr('sErr','בחר מה נמצא.'); return; }
   if(draft.safety==='אחר' && !txt){ showErr('sErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
   c.items.forEach(function(i){ i.actual=0; }); c.status='failed';
   c.result={at:Date.now(), reason:SAFETY, safety:draft.safety, text:txt, empties:{1:0,2:0}, time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   if(draft.safetyImg){ photos['s-'+c.id]=draft.safetyImg; savePhotos(); }
   c.result.safeUp=false; save(); render(); setTimeout(flushSafety, 500);
-  /* the next step is to tell the office right away: WhatsApp with the details, or a call */
+  /* the next step is to tell the office right away: WhatsApp with the details, or a call.
+     the stop is written — from here this is only a message card: no resume, no further saving */
+  sheetKind=''; sheetStop=''; clearResume();
   document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נרשם ✓ — עכשיו למשרד</h2><div class="msg">'+esc(safetyMsg(c))+'</div>'+
     '<a class="btn btn-bad linkbtn" href="https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(safetyMsg(c))+'" target="_blank" rel="noopener">💬 שלח למשרד בוואטסאפ</a>'+
     '<a class="btn btn-ghost linkbtn" href="tel:'+OFFICE_TEL+'">📞 התקשר למשרד</a>'+
@@ -3043,13 +3171,16 @@ function confirmSafety(){
     '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
 }
 function confirmFail(){
+  var c=pendGuard(); if(!c) return;
   touchDay();
-  var c=byId(draft.stop)||cur(), txt=(document.getElementById('failTxt').value||'').trim();
+  var txt=(document.getElementById('failTxt').value||'').trim();
   if(!draft.reason){ showErr('fErr','בחר סיבה.'); return; }
   if(draft.reason==='אחר' && !txt){ showErr('fErr','ב״אחר״ צריך לכתוב פירוט.'); return; }
   c.items.forEach(function(i){ i.actual=0; }); c.status='failed'; c.result={at:Date.now(), reason:draft.reason, text:txt, empties:{1:0,2:0}, cancelled:draft.reason===CANCEL};
   if(c.officeTask) taskAck(c.officeTask,'failed', draft.reason+(txt?' — '+txt:''));
+  metricsDone(c.id);
   after('נרשם: '+draft.reason);
+  return true;
 }
 async function confirmHot(){
   var g=function(id){ return (document.getElementById(id).value||'').trim(); };
@@ -3330,8 +3461,9 @@ function taskDoneSheet(c){
     '<p class="err" id="tErr" hidden></p><button class="btn btn-ok" type="button" id="confirmTask">✓ בוצע</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
 function confirmTask(){
+  var c=byId(draft.stop);
+  if(!c || c.status!=='pending'){ closeSheet(); render(); toast('⚠ המטלה כבר עודכנה בינתיים — בדוק אותה ברשימה'); return; }
   touchDay();
-  var c=byId(draft.stop); if(!c) return;
   if(!draft.method){ showErr('tErr','בחר תשלום (או ״ללא תשלום״).'); return; }
   var amt=parseFloat(String(document.getElementById('tAmt').value||'').replace(',','.'))||0;
   if(draft.method!=='none' && draft.method!=='prepaid' && amt<=0){ showErr('tErr','כתוב את הסכום.'); return; }
@@ -3545,6 +3677,7 @@ document.addEventListener('click',function(ev){
     if(s && c && s!==c){ var ar=state.stops; ar.splice(ar.indexOf(s),1); ar.splice(ar.indexOf(c),0,s); save(); closeSheet(); render(); window.scrollTo(0,0); toast(s.name+' — העצירה הבאה. השאר לא זז.'); state.lastMoved=s.id; save(); render(); }
     return;
   }
+  if(ds.reopen) metricsAdd({stop:ds.reopen, reopen:1});
   if(ds.reopen){
     var r=state.stops.filter(function(x){ return x.id===ds.reopen; })[0];
     /* a delivery note already issued keeps its number — the report lists it as cancelled */
@@ -3684,12 +3817,15 @@ document.addEventListener('change',function(ev){
   if(t.dataset && t.dataset.photo==='pinkx'){ readPhoto(t.files[0],function(u){ photos['pink-exit']=u; savePhotos(); state.pinkExit=true; save();
     var pv=document.getElementById('pinkxPrev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="הטופס הוורוד">'; toast('הטופס הוורוד נשמר'); }); return; }
   if(t.dataset && t.dataset.photo==='offImg'){ var fo=t.files && t.files[0]; if(fo && draft){ draft.offImg=URL.createObjectURL(fo); document.getElementById('offImgPrev').innerHTML='<img class="thumb" src="'+draft.offImg+'" alt="הצילום שנבחר">'; } return; }
+  if(t.id==='mxCopy'){ try{ navigator.clipboard.writeText(JSON.stringify(window.__mx||{})).then(function(){ toast('הועתק'); }); }catch(e){ toast('לא הצלחתי להעתיק'); } return; }
+  if(t.id==='uiFull'){ var uN=Date.now(); state.uiFull=t.checked; state.uiFullAt=uN; lsSet('gazgal-ui-full', {v:t.checked, at:uN}); save(); toast(t.checked?'תצוגה מלאה':'התצוגה הפשוטה תגיע בשלב הבא'); return; }
   if(t.dataset && t.dataset.photo){ var kind=t.dataset.photo;
     readPhoto(t.files[0],function(u){ if(!draft) return; draft[kind]=u; var pv=document.getElementById(kind+'Prev'); if(pv) pv.innerHTML='<img class="thumb" src="'+u+'" alt="התמונה שנבחרה">'; }); }
 });
 
 render();
 startPolling();
+restoreSheet();
 if(/[?&]share=1/.test(location.search)){
   history.replaceState(null,'',location.pathname);
   caches.open('gazgal-share').then(function(c){ return Promise.all([c.match('shared-image'), c.match('shared-text')]).then(function(r){
