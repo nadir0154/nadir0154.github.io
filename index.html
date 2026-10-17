@@ -1053,6 +1053,7 @@ async function locate(s){
   var pt=ptOf(s); if(pt) return {p:[pt.lat,pt.lon], how:'חנייה שמורה'};
   var city=s.city||'', st=streetOf(s), town=city ? await townAt(city) : null;
   if(st){ var a=await addrAt(st, s.house||'', city, town); if(a) return a; }
+  if(st && s.house && s.house!=='0'){ var a2=await addrAt(st, '', city, town); if(a2) return {p:a2.p, how:'רחוב'}; }   /* "סמילו 39" not known — "סמילו" is */
   if(st){ var fz=await fuzzyStreet(st, s.house||'', city); if(fz && (!town || dist(town,fz.p)<=TOWN_KM)) return fz; }
   if(town) return {p:town, how:'יישוב'};
   return {p:null, how:'לא נמצא'};
@@ -1062,17 +1063,50 @@ function dist(a,b){
   var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a[0]*rad)*Math.cos(b[0]*rad)*Math.sin(dLo/2)*Math.sin(dLo/2);
   return 12742*Math.asin(Math.sqrt(h));
 }
-function optimize(start,pts){
-  function len(pp){ var t=0, c=start; pp.forEach(function(x){ t+=dist(c,x.p); c=x.p; }); return t; }
-  var left=pts.slice(), path=[], c=start;
-  while(left.length){ var bi=0, bd=Infinity; left.forEach(function(x,i){ var d=dist(c,x.p); if(d<bd){ bd=d; bi=i; } }); var nx=left.splice(bi,1)[0]; path.push(nx); c=nx.p; }
-  var better=true, guard=0;
-  while(better && guard++<60){ better=false;
+/* FEEDBACK #100 (נדיר, 17/10): the walking order by the ROADS, and home to Ofakim at the end.
+   The straight-line order ended far from home (Ashkelon, 45 min back) and did not see the roads; on the 13/10 journal the
+   road order is 21 min shorter. Driving times come from OSRM (OpenStreetMap routing) — only the points go out, never a
+   name or an address. Without it (no signal / the service busy): the same order on straight lines ×1.35.
+   A town is done in one visit: going back to a town already left costs 15 min in the comparison. */
+var HOME=START_FALLBACK.ofakim;   /* the trucks end the day at the depot in Ofakim (נדיר, 17/10) */
+function airSec(a,b){ return dist(a,b)*1.35/45*3600; }
+async function roadMatrix(pts){
+  if(pts.length>100) return null;   /* the public server answers up to 100 points */
+  var ctl=window.AbortController ? new AbortController() : null, t=setTimeout(function(){ try{ if(ctl) ctl.abort(); }catch(e){} }, 15000);
+  try{ var r=await fetch('https://router.project-osrm.org/table/v1/driving/'+pts.map(function(p){ return p[1].toFixed(5)+','+p[0].toFixed(5); }).join(';')+'?annotations=duration', ctl?{signal:ctl.signal}:{});
+    if(!r.ok) return null; var j=await r.json(); if(j.code!=='Ok' || !j.durations) return null;
+    return j.durations.map(function(row,i){ return row.map(function(v,k){ return v==null ? airSec(pts[i],pts[k]) : v; }); });
+  }catch(e){ return null; }finally{ clearTimeout(t); } }
+function townKey(s){ return gNrm(String(s.city||'').replace(/^(קיבוץ|מושב)\s+/,'')); }
+/* order the nodes idx (rows of D) from node "from", ending at node "home" (null = anywhere): nearest first, then 2-opt and
+   moving runs of 1–3 stops, until nothing improves (or 4 s on a slow phone) */
+function tour(D, from, idx, home, town){
+  function cost(p){ var t=0, c=from, seen={}, prev=null, sp=0;
+    for(var i=0;i<p.length;i++){ t+=D[c][p[i]]; c=p[i]; var tw=town[c]; if(tw!==prev){ if(seen[tw]) sp++; seen[tw]=1; prev=tw; } }
+    return t+(home!=null?D[c][home]:0)+900*sp; }
+  var left=idx.slice(), path=[], c=from;
+  while(left.length){ var bi=0; for(var i=1;i<left.length;i++) if(D[c][left[i]]<D[c][left[bi]]) bi=i; c=left.splice(bi,1)[0]; path.push(c); }
+  var best=cost(path), better=true, guard=0, t0=Date.now();
+  while(better && guard++<40 && Date.now()-t0<4000){ better=false;
     for(var i=0;i<path.length-1;i++) for(var k=i+1;k<path.length;k++){
-      var np=path.slice(0,i).concat(path.slice(i,k+1).reverse(), path.slice(k+1));
-      if(len(np)+1e-9<len(path)){ path=np; better=true; } } }
-  return {path:path, km:len(path)};
+      var np=path.slice(0,i).concat(path.slice(i,k+1).reverse(), path.slice(k+1)), nc=cost(np); if(nc+1e-6<best){ path=np; best=nc; better=true; } }
+    for(var sg=1;sg<=3;sg++) for(var x=0;x+sg<=path.length;x++){
+      var seg=path.slice(x,x+sg), rest=path.slice(0,x).concat(path.slice(x+sg)), vs=[seg, seg.slice().reverse()];
+      for(var y=0;y<=rest.length;y++) for(var v=0;v<2;v++){ var np2=rest.slice(0,y).concat(vs[v], rest.slice(y)), nc2=cost(np2); if(nc2+1e-6<best){ path=np2; best=nc2; better=true; break; } } }
+  }
+  return path;
 }
+/* the whole order: "🌅 בבוקר" customers first (before 11:00), then the rest, and home */
+async function orderStops(start, located){
+  var pts=[start, HOME].concat(located.map(function(x){ return x.p; })), D=await roadMatrix(pts), road=!!D;
+  if(!D) D=pts.map(function(p){ return pts.map(function(q){ return airSec(p,q); }); });
+  var town=['',''].concat(located.map(function(x){ return townKey(x.s); })), idx=located.map(function(x,i){ return i+2; });
+  var am=amActive() ? idx.filter(function(i){ return isAm(located[i-2].s); }) : [], rest=idx.filter(function(i){ return am.indexOf(i)<0; });
+  var p1=am.length ? tour(D, 0, am, null, town) : [], p2=tour(D, p1.length?p1[p1.length-1]:0, rest, 1, town), path=p1.concat(p2);
+  var sec=0, c=0; path.forEach(function(i){ sec+=D[c][i]; c=i; }); sec+=D[c][1];
+  return {path:path.map(function(i){ return located[i-2]; }), min:Math.round(sec/60), road:road, am:am.length};
+}
+function hmText(min){ return min>=60 ? Math.floor(min/60)+':'+('0'+(min%60)).slice(-2)+' שע׳' : min+' דק׳'; }
 /* FEEDBACK #95: when the GPS will not give a good fix (inside the truck, "approximate location", between buildings) the
    driver puts the point on the map himself: satellite photo, the map moves under a fixed pin. Leaflet comes from the CDN
    only when needed; the map tiles get only the area, never a name. */
@@ -1150,10 +1184,11 @@ async function autoRoute(fromHere){
   try{
     var start=await startPoint(fromHere);
     for(var i=0;i<ps.length;i++){ prog(i+1); var L=await locate(ps[i]); ps[i].geoHow=L.how; ps[i].pt=L.p||null; if(L.p) located.push({s:ps[i], p:L.p}); else missing.push(ps[i]); }
-    var r=routeOrder(start, located);
+    app.innerHTML=topbar()+'<main><div class="loading"><div class="spin"></div>מחשב את הדרך הקצרה בכבישים…</div></main>';
+    var r=await orderStops(start, located);
     state.stops=done().concat(r.path.map(function(x){ return x.s; }), missing, rest0);
     goRoute(); state.view='route'; save(); render(); window.scrollTo(0,0); wake(); fillHoods();
-    toast('סודר לפי מפה · כ־'+Math.round(r.km)+' ק״מ בקו אווירי'+(r.am?' · 🌅 '+r.am+' של בוקר קודם':'')+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
+    toast((r.road?'סודר לפי הכבישים':'סודר בקו אווירי (אין חיבור למפת הכבישים)')+' · כ־'+hmText(r.min)+' נהיגה כולל החזרה לאופקים'+(r.am?' · 🌅 '+r.am+' של בוקר קודם':'')+(missing.length?' · '+missing.length+' לא נמצאו, הם בסוף':''));
   }catch(e){
     startRoute(false);
     toast('אין גישה למפה — סודר לפי יישוב. אפשר לסדר ידנית עם ✋.');
@@ -1421,15 +1456,18 @@ async function urgentRoute(id){
     var L=await locate(s); if(!L.p){ toast('🚨 '+s.name+' — הבאה (לא נמצאה במפה, השאר בלי שינוי)'); return; }
     var rest=routePending().filter(function(x){ return x!==s; }), rest1=others().filter(function(x){ return x!==s; }), located=[], missing=[];
     for(var i=0;i<rest.length;i++){ var l2=rest[i].pt!==undefined ? {p:rest[i].pt} : await locate(rest[i]); rest[i].pt=l2.p||null; if(l2.p) located.push({s:rest[i], p:l2.p}); else missing.push(rest[i]); }
-    var r=optimize(L.p, located);
+    var r=await orderStops(L.p, located);
     state.stops=done().concat([s], r.path.map(function(x){ return x.s; }), missing, rest1); save(); render();
     toast('🚨 '+s.name+' הבאה, והשאר מסודר מהמקום שלה');
   }catch(e){ toast('🚨 '+s.name+' — הבאה (אין גישה למפה, השאר בלי שינוי)'); }
 }
 
 /* ================= the office bot: messages the office sends to the GazGal WhatsApp number =================
-   The server only relays (see server/ in the repo). This phone pulls new messages every 30 s while the app is open,
-   reads the screenshot itself (readCard above), and tells the bot what the driver did so the office gets an answer.
+   The server only relays (see server/ in the repo). Workers' free plan allows 100,000 requests a day, so the phone asks
+   only as often as it must: every 60 s while the screen is on — new messages, the office's answer to an order typed in
+   the field, and the office's changes to an order (paid at the office / cancelled: the driver must know before he
+   collects) — and every 3 min for journals, tasks and the shared lists (also in the background). Coming back to the
+   app asks at once. It reads the screenshot itself (readCard above), and tells the bot what the driver did.
    The phone is connected once: it makes a random key, and the driver approves it by sending "חבר 1234" to the bot. */
 var BOT_API = location.hostname==='localhost' ? 'http://localhost:8787' : 'https://bot.gazgal.com';
 var BOT_KEY_LS='gazgal-bot-key', INBOX_LS='gazgal-inbox';
@@ -1463,7 +1501,8 @@ async function pollInbox(quiet,force){
     if(newCount()!==before && !document.querySelector('.scrim')) render();
   }catch(e){ /* no signal — try again next time */ }
 }
-function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(!BOT_API || bot.status!=='active') return; pollInbox(true); pollMore(); checkRestore(); sendLive(); syncDn(); bot.polling=setInterval(function(){ pollInbox(); pollMore(); }, 30000);
+function startPolling(){ if(bot.polling) clearInterval(bot.polling); if(bot.moreTimer) clearInterval(bot.moreTimer); if(!BOT_API || bot.status!=='active') return; pollInbox(true); pollMore(); checkRestore(); sendLive(); syncDn(); bot.polling=setInterval(function(){ if(!document.hidden){ pollInbox(); pollOffice(); } }, 60000);
+  bot.moreTimer=setInterval(function(){ pollMore(); }, 180000);
   if(bot.liveTimer) clearInterval(bot.liveTimer); bot.liveTimer=setInterval(function(){ if(!document.hidden) sendLive(); }, 120000); }
 
 /* ---- FEEDBACK #40: customers call the office "מתי הנהג מגיע?". The office page shows where the route is: what was
@@ -1547,6 +1586,9 @@ async function pollEdits(){
     await botFetch('/api/edits/ack',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:ids})});
   }catch(e){}
 }
+/* what the driver must not miss on the way to a customer: the office's OK for an order he typed, and its changes */
+async function pollOffice(){ if(!BOT_API || bot.status!=='active' || pollOffice.busy) return; pollOffice.busy=true;   /* never twice at once — an edit would apply twice */
+  try{ await pollRequests(); flushRequests(); await pollEdits(); } finally { pollOffice.busy=false; } }
 async function pollMore(){
   if(!BOT_API || bot.status!=='active') return;
   try{
@@ -1555,7 +1597,7 @@ async function pollMore(){
   }catch(e){}
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
-  await pollRequests(); flushRequests(); pollEdits(); if(bot.backupDirty) doBackup();
+  await pollOffice(); if(bot.backupDirty) doBackup();
   syncPlaces().then(syncStands); flushOutbox(); backfillOutbox(); syncTrucks(); syncFleet(); syncCountLog();
 }
 async function loadOfficeJournal(id){
@@ -1623,7 +1665,7 @@ async function pollRequests(){
     if(changed){ save(); if(!document.querySelector('.scrim')) render(); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} }
   }catch(e){}
 }
-document.addEventListener('visibilitychange',function(){ if(!document.hidden){ pollInbox(); if(state.phase==='route') sendLive(); } });
+document.addEventListener('visibilitychange',function(){ if(!document.hidden){ pollInbox(); pollOffice(); if(state.phase==='route') sendLive(); } });
 /* FEEDBACK #64: on a phone that cannot install the app (Android Go) the browser may clear site data when space runs low — ask to keep it */
 try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(function(ok){ if(!ok) navigator.storage.persist(); }); }catch(e){}
 async function botAck(status,result){
@@ -3309,12 +3351,6 @@ function amBtn(s){
   if(s.status!=='pending') return '';
   return '<button class="linkish" type="button" data-am="'+esc(s.id)+'">'+(isAm(s)?'🌅 תמיד בבוקר — בטל':'🌅 סמן: תמיד בבוקר (למשל: אין חניה אחר כך)')+'</button>';
 }
-function routeOrder(start, located){
-  var am=amActive() ? located.filter(function(x){ return isAm(x.s); }) : [], rest=located.filter(function(x){ return am.indexOf(x)<0; });
-  if(!am.length) return optimize(start, located);
-  var r1=optimize(start, am), r2=optimize(r1.path[r1.path.length-1].p, rest);
-  return {path:r1.path.concat(r2.path), km:r1.km+r2.km, am:am.length};
-}
 async function rerouteAfter(s){
   var ps=routePending(), ix=ps.indexOf(s); if(ix<0 || ps.length-ix<3) return;
   var rest=ps.slice(ix+1);
@@ -3324,7 +3360,7 @@ async function rerouteAfter(s){
     s.pt=L;
     var located=[], missing=[];
     for(var i=0;i<rest.length;i++){ var x=rest[i]; if(x.pt===undefined){ var l2=await locate(x); x.geoHow=l2.how; x.pt=l2.p||null; } if(x.pt) located.push({s:x, p:x.pt}); else missing.push(x); }
-    var order=routeOrder(L, located).path.map(function(x){ return x.s; }).concat(missing);
+    var order=(await orderStops(L, located)).path.map(function(x){ return x.s; }).concat(missing);
     /* the route may have changed while the map worked: what is now up to s stays, then the new order, then anything new */
     var now=routePending(), k=now.indexOf(s); if(k<0) return;
     var tail=order.filter(function(x){ return now.indexOf(x)>k; }), extra=now.slice(k+1).filter(function(x){ return tail.indexOf(x)<0; });
