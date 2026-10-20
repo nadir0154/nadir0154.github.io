@@ -1074,6 +1074,12 @@ async function locate(s){
   if(town) return {p:town, how:'יישוב'};
   return {p:null, how:'לא נמצא'};
 }
+/* where a stop is for the order: a parking marked since the last look wins; otherwise the map's answer, kept on the stop
+   with HOW it was found — a stop known only by its town must not be ordered as an exact one (#117) */
+async function placeOf(s){ var pt=ptOf(s);
+  if(pt){ s.pt=[pt.lat,pt.lon]; s.geoHow='חנייה שמורה'; return s.pt; }
+  if(s.pt===undefined || !s.geoHow || s.geoHow==='חנייה שמורה'){ var L=await locate(s); s.geoHow=L.how; s.pt=L.p||null; }
+  return s.pt; }
 function dist(a,b){
   var rad=Math.PI/180, dLa=(b[0]-a[0])*rad, dLo=(b[1]-a[1])*rad;
   var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a[0]*rad)*Math.cos(b[0]*rad)*Math.sin(dLo/2)*Math.sin(dLo/2);
@@ -1112,15 +1118,40 @@ function tour(D, from, idx, home, town){
   }
   return path;
 }
+/* FEEDBACK #117 (journal 18/10, Dimona): three streets the map does not know all stood on the town's centre, and the order
+   drove through the middle of town for them and wandered (two houses on one street came apart).
+   A stop placed only "by the town" is not a point to drive to: it is left out of the order and goes at the end of its
+   town's visit, still tagged "מיקום משוער" (✋ moves it; marking the place saves it for next time). It stays in the order
+   only when nothing else in its town is known. Stops on one spot — the same building, or one street the map knows only
+   as a street — are one stop for the order, so they always come one after the other. */
+var SAME_SPOT_KM=0.03, STREET_KM=1.5, GEO_RANK={'חנייה שמורה':3, 'כתובת':2, 'רחוב':1};
+function streetKey(s){ var st=streetOf(s); return st ? townKey(s)+'|'+gSkel(cleanStreet(st)) : ''; }
+/* two stops are one spot: 30 m apart — or one street, at least one of them known only as the street, up to 1.5 km apart
+   (two exact houses at the two ends of a long street stay two stops) */
+function oneSpot(x, y){ var d=dist(x.p,y.p), k=streetKey(x.s);
+  return d<=SAME_SPOT_KM || (!!k && k===streetKey(y.s) && d<=STREET_KM && (x.s.geoHow==='רחוב' || y.s.geoHow==='רחוב')); }
+function spots(firm){ var nodes=[];
+  firm.forEach(function(x){
+    var n=nodes.filter(function(n){ return n.m.every(function(y){ return oneSpot(x,y); }); })[0];
+    if(!n) nodes.push({p:x.p, r:GEO_RANK[x.s.geoHow]||0, m:[x]});
+    else { n.m.push(x); if((GEO_RANK[x.s.geoHow]||0)>n.r){ n.p=x.p; n.r=GEO_RANK[x.s.geoHow]||0; } } });
+  return nodes; }
 /* the whole order: "🌅 בבוקר" customers first (before 11:00), then the rest, and home */
 async function orderStops(start, located){
-  var pts=[start, HOME].concat(located.map(function(x){ return x.p; })), D=await roadMatrix(pts), road=!!D;
+  var known={}; located.forEach(function(x){ if(x.s.geoHow!=='יישוב') known[townKey(x.s)]=1; });
+  var amOn=amActive(), vague=located.filter(function(x){ return x.s.geoHow==='יישוב' && known[townKey(x.s)] && !(amOn && isAm(x.s)); }),
+      nodes=spots(located.filter(function(x){ return vague.indexOf(x)<0; }));
+  var pts=[start, HOME].concat(nodes.map(function(n){ return n.p; })), D=await roadMatrix(pts), road=!!D;
   if(!D) D=pts.map(function(p){ return pts.map(function(q){ return airSec(p,q); }); });
-  var town=['',''].concat(located.map(function(x){ return townKey(x.s); })), idx=located.map(function(x,i){ return i+2; });
-  var am=amActive() ? idx.filter(function(i){ return isAm(located[i-2].s); }) : [], rest=idx.filter(function(i){ return am.indexOf(i)<0; });
+  var town=['',''].concat(nodes.map(function(n){ return townKey(n.m[0].s); })), idx=nodes.map(function(n,i){ return i+2; });
+  var am=amOn ? idx.filter(function(i){ return nodes[i-2].m.some(function(x){ return isAm(x.s); }); }) : [], rest=idx.filter(function(i){ return am.indexOf(i)<0; });
   var p1=am.length ? tour(D, 0, am, null, town) : [], p2=tour(D, p1.length?p1[p1.length-1]:0, rest, 1, town), path=p1.concat(p2);
   var sec=0, c=0; path.forEach(function(i){ sec+=D[c][i]; c=i; }); sec+=D[c][1];
-  return {path:path.map(function(i){ return located[i-2]; }), min:Math.round(sec/60), road:road, am:am.length};
+  var out=[]; path.forEach(function(i){ out=out.concat(nodes[i-2].m); });
+  /* the vague ones: after the last known stop of their town, one street together */
+  vague.sort(function(a,b){ return streetKey(a.s)<streetKey(b.s) ? -1 : streetKey(a.s)>streetKey(b.s) ? 1 : 0; }).forEach(function(x){
+    var t=townKey(x.s), at=-1; out.forEach(function(y,j){ if(townKey(y.s)===t) at=j; }); out.splice(at+1, 0, x); });
+  return {path:out, min:Math.round(sec/60), road:road, am:am.reduce(function(t,i){ return t+nodes[i-2].m.filter(function(x){ return isAm(x.s); }).length; }, 0)};
 }
 function hmText(min){ return min>=60 ? Math.floor(min/60)+':'+('0'+(min%60)).slice(-2)+' שע׳' : min+' דק׳'; }
 /* FEEDBACK #95: when the GPS will not give a good fix (inside the truck, "approximate location", between buildings) the
@@ -1216,7 +1247,7 @@ async function autoRoute(fromHere){
 async function spotFor(s){
   var ps=routePending().filter(function(x){ return x!==s; }), L=await locate(s); s.geoHow=L.how; s.pt=L.p||null; delete s.hood; setTimeout(fillHoods, 0);
   if(!L.p) return {none:'map'};
-  for(var i=0;i<ps.length;i++){ if(ps[i].pt===undefined){ var l2=await locate(ps[i]); ps[i].pt=l2.p||null; } }
+  for(var i=0;i<ps.length;i++) await placeOf(ps[i]);
   var origin=null; try{ var pos=await here(); origin=[pos.coords.latitude,pos.coords.longitude]; }catch(e){}
   var pts=ps.filter(function(x){ return x.pt; });
   if(!pts.length) return {none:'pts'};
@@ -1469,10 +1500,10 @@ async function urgentRoute(id){
   var arr=state.stops, c=cur(); arr.splice(arr.indexOf(s),1); arr.splice(c?arr.indexOf(c):arr.length,0,s);
   closeSheet(); save(); render(); window.scrollTo(0,0); toast('🚨 '+s.name+' — העצירה הבאה. מסדר את השאר ממנה…');
   try{
-    var L=await locate(s); if(!L.p){ toast('🚨 '+s.name+' — הבאה (לא נמצאה במפה, השאר בלי שינוי)'); return; }
+    var Lp=await placeOf(s); if(!Lp){ toast('🚨 '+s.name+' — הבאה (לא נמצאה במפה, השאר בלי שינוי)'); return; }
     var rest=routePending().filter(function(x){ return x!==s; }), rest1=others().filter(function(x){ return x!==s; }), located=[], missing=[];
-    for(var i=0;i<rest.length;i++){ var l2=rest[i].pt!==undefined ? {p:rest[i].pt} : await locate(rest[i]); rest[i].pt=l2.p||null; if(l2.p) located.push({s:rest[i], p:l2.p}); else missing.push(rest[i]); }
-    var r=await orderStops(L.p, located);
+    for(var i=0;i<rest.length;i++){ var p2=await placeOf(rest[i]); if(p2) located.push({s:rest[i], p:p2}); else missing.push(rest[i]); }
+    var r=await orderStops(Lp, located);
     state.stops=done().concat([s], r.path.map(function(x){ return x.s; }), missing, rest1); save(); render();
     toast('🚨 '+s.name+' הבאה, והשאר מסודר מהמקום שלה');
   }catch(e){ toast('🚨 '+s.name+' — הבאה (אין גישה למפה, השאר בלי שינוי)'); }
@@ -2868,7 +2899,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.16', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.17', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -3492,10 +3523,9 @@ async function rerouteAfter(s){
   var rest=ps.slice(ix+1);
   toast('מסדר את השאר מ'+s.name+'…');
   try{
-    var L=s.pt || (await locate(s)).p; if(!L){ toast(s.name+' לא נמצא במפה — השאר בלי שינוי'); return; }
-    s.pt=L;
+    var L=await placeOf(s); if(!L){ toast(s.name+' לא נמצא במפה — השאר בלי שינוי'); return; }
     var located=[], missing=[];
-    for(var i=0;i<rest.length;i++){ var x=rest[i]; if(x.pt===undefined){ var l2=await locate(x); x.geoHow=l2.how; x.pt=l2.p||null; } if(x.pt) located.push({s:x, p:x.pt}); else missing.push(x); }
+    for(var i=0;i<rest.length;i++){ var x=rest[i], px=await placeOf(x); if(px) located.push({s:x, p:px}); else missing.push(x); }
     var order=(await orderStops(L, located)).path.map(function(x){ return x.s; }).concat(missing);
     /* the route may have changed while the map worked: what is now up to s stays, then the new order, then anything new */
     var now=routePending(), k=now.indexOf(s); if(k<0) return;
