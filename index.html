@@ -286,7 +286,7 @@ var POINT_BTN = {me:'משאית נדיר', eyal:'משאית אייל', yoram:'מ
 var DRIVER_KEY_LS='gazgal-driver-key';
 function ME(){ return {eyal:'eyal', yoram:'yoram'}[lsGet(DRIVER_KEY_LS,'')] || 'me'; }
 function pointBtn(k){ return k===ME() ? 'המשאית שלי' : POINT_BTN[k]; }
-var MOMENTS = ['כניסה','יציאה','יציאה למתקן','סוף יום'];
+var MOMENTS = ['כניסה','יציאה','יציאה למתקן','ספירה ביניים','סוף יום'];   /* #125: "ספירה ביניים" — a count during the day; it never changes the day's opening */
 var CF = [ {k:'gm',l:'גמ',d:'גדול מלא'}, {k:'km',l:'קמ',d:'קטן מלא'}, {k:'gr',l:'גר',d:'גדול ריק'}, {k:'kr',l:'קר',d:'קטן ריק'} ];
 var AF = [ {k:'a5m',kg:'5',s:'מלא'}, {k:'a5r',kg:'5',s:'ריק'}, {k:'a25m',kg:'2.5',s:'מלא'}, {k:'a25r',kg:'2.5',s:'ריק'} ];
 var CITY_ORDER = {
@@ -493,7 +493,10 @@ function trucks(){ return lsGet('gazgal-trucks',{}); }
 function plates(){ var T=trucks(); return Object.keys(T).sort(function(a,b){ return ((T[b]||{}).at||0)-((T[a]||{}).at||0); }); }
 function myPlate(){ return state.truck || lsGet('gazgal-my-truck','') || plates()[0] || ''; }
 function truckSave(plate,c){
-  var T=trucks(); T[plate]={v:c.v, at:idMs(c)||Date.now(), day:dayOf(), moment:c.moment, time:c.time, by:state.driver||''}; lsSet('gazgal-trucks',T);
+  plate=plateOk(plate); if(plate.length<5) return;
+  /* #125: a count pasted later (Eyal's morning messages) carries its own time and day, and never replaces a newer state */
+  var T=trucks(), at=c.at||idMs(c)||Date.now(); if(T[plate] && (T[plate].at||0)>at) return;
+  T[plate]={v:c.v, at:at, day:c.day||dayOf(), moment:c.moment, time:c.time, by:c.by||state.driver||''}; lsSet('gazgal-trucks',T);
   var d=lsGet('gazgal-trucks-dirty',[]); if(d.indexOf(plate)<0) d.push(plate); lsSet('gazgal-trucks-dirty',d);
   syncTrucks();
 }
@@ -509,6 +512,38 @@ async function syncTrucks(){
     if(ch) lsSet('gazgal-trucks',T2);
   }catch(e){}
 }
+/* FEEDBACK #125 (נדיר, 22/10: three trucks, two swaps at Ramat Hovav, cylinders passed to Eyal, full ones unloaded at the
+   ramp — "the counts were clumsy"): which truck stands at each count point ("נדיר" → 43578304), kept on the phone and
+   learnt from every count with a plate — so a count pasted from WhatsApp goes into that truck's own history too */
+function pointPlates(){ return lsGet('gazgal-point-plates',{}); }
+function setPointPlate(pt, plate){ plate=plateOk(plate); if(!pt || pt==='ramp' || pt==='other' || plate.length<5) return; var m=pointPlates(); if(m[pt]===plate) return; m[pt]=plate; lsSet('gazgal-point-plates', m); }
+/* one warehouse / facility stop, a hand-over to another driver, or a truck swap: into the day, the count history, and — on a
+   swap — BOTH trucks' last state (the old one ends with what came back, the new one starts with what it has) */
+function facRows(where){ var v=function(k){ return draft && draft.fac && draft.fac[k] ? draft.fac[k] : ''; };
+  var frow=function(k,label){ return '<span class="r">'+label+'</span><input class="cin num" data-fac="'+k+'-2" inputmode="numeric" aria-label="'+label+' 48" value="'+v(k+'-2')+'"><input class="cin num" data-fac="'+k+'-1" inputmode="numeric" aria-label="'+label+' 12" value="'+v(k+'-1')+'">'; };
+  var head='<div class="cgrid"><span></span><span class="h">48 ק״ג</span><span class="h">12 ק״ג</span>';
+  if(where==='נהג') return '<div class="field"><span class="lbl">מה עבר ביניכם</span>'+head+frow('uf','נתתי מלאים')+frow('le','קיבלתי ריקים')+'</div></div>'+
+    '<details class="amg"><summary>קיבלתי מלאים / נתתי ריקים</summary>'+head+frow('lf','קיבלתי מלאים')+frow('ue','נתתי ריקים')+'</div></details>';
+  return '<div class="field"><span class="lbl">כמה העמסתי / הורדתי</span>'+head+frow('lf','העמסתי מלאים')+frow('ue','הורדתי ריקים')+'</div></div>'+
+    '<details class="amg"><summary>העמסתי ריקים / הורדתי מלאים</summary>'+head+frow('le','העמסתי ריקים')+frow('uf','הורדתי מלאים')+'</div></details>'; }
+function delFac(id){ var dfx=state.facility.filter(function(f){ return f.id===id; })[0];
+    /* #125, Jarvis: a deleted swap puts back what it changed — my truck, the point's truck, and both trucks' last state (as now) */
+    if(dfx && dfx.swap && dfx.prev){ var pv=dfx.prev; state.truck=pv.truck||dfx.fromTruck||''; lsSet('gazgal-my-truck', state.truck); var ppm=pointPlates(); if(pv.pp) ppm[ME()]=pv.pp; else delete ppm[ME()]; lsSet('gazgal-point-plates', ppm);
+      [[dfx.fromTruck, pv.old], [dfx.truck, pv.nw]].forEach(function(x){ if(x[0] && x[1]) truckSave(x[0], {at:Date.now(), v:x[1].v, day:x[1].day, moment:x[1].moment, time:x[1].time, by:x[1].by}); }); }
+  state.facility=state.facility.filter(function(f){ return f.id!==id; }); delete photos['pink-'+id]; savePhotos(); save(); }
+function recordFac(o){
+  var now=Date.now(), fid='F'+now, ftime=new Date(now).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  var f={id:fid, where:o.where, to:o.to||'', time:ftime, mv:o.mv, swap:!!o.swap, truck:o.newPlate||'', fromTruck:o.swap?(o.oldPlate||''):'', oldV:o.oldV||null, newV:o.newV||null, note:o.note||'', pink:!!o.pink};
+  if(o.swap){ var T0=trucks(); f.prev={truck:state.truck||lsGet('gazgal-my-truck',''), pp:pointPlates()[ME()]||'', old:T0[o.oldPlate]||null, nw:T0[o.newPlate]||null}; }
+  state.facility.push(f);
+  if(o.swap){
+    putCountLog([{id:'A'+fid+'o', kind:'count', src:'app', day:dayOf(), time:ftime, at:now, by:state.driver||'', point:ME(), pointText:'', moment:'סוף יום', plate:o.oldPlate||'', v:o.oldV},
+                 {id:'A'+fid+'n', kind:'count', src:'app', day:dayOf(), time:ftime, at:now+1, by:state.driver||'', point:ME(), pointText:'', moment:'יציאה', plate:o.newPlate, v:o.newV}]);
+    if(o.oldPlate) truckSave(o.oldPlate, {at:now, v:o.oldV, moment:'סוף יום', time:ftime});
+    truckSave(o.newPlate, {at:now+1, v:o.newV, moment:'יציאה', time:ftime});
+    state.truck=o.newPlate; lsSet('gazgal-my-truck', o.newPlate); setPointPlate(ME(), o.newPlate);
+  }
+  save(); return f; }
 /* now − before, per kind: + full = loaded at the facility, − empty = unloaded there */
 function truckMove(a,b){ var m={}, any=false; CF.forEach(function(f){ m[f.k]=(b[f.k]||0)-(a[f.k]||0); if(m[f.k]) any=true; }); return any ? m : null; }
 function moveWords(m){
@@ -549,7 +584,7 @@ function parseCounts(txt){
     var time=(/(\d{1,2}:\d\d)/.exec(msg.when)||[])[1]||'', day=normDay(msg.when)||todayStr(), c=null;
     msg.lines.forEach(function(raw){ var l=raw.trim(); if(!l) return;
       var n=l.replace(/[״"'׳`]/g,'').replace(/\s+/g,' ');
-      var hm=/^(.+?) (יציאה למתקן|כניסה|יציאה|סוף יום)$/.exec(n);
+      var hm=/^(.+?) (יציאה למתקן|ספירה ביניים|כניסה|יציאה|סוף יום)$/.exec(n);
       if(hm){ var who=hm[1].replace(/\(.*?\)/g,'').trim();
         c={day:day, time:time, by:msg.by, point:POINT_OF[who]||'other', pointText:POINT_OF[who]?'':who, moment:hm[2], plate:(/(\d{5,})/.exec(hm[1])||[])[1]||'', v:{}};
         counts.push(c); return; }
@@ -567,6 +602,8 @@ function parseCounts(txt){
   counts.forEach(function(c){ if(!c.same) return; var last=cBefore(c, countLog().concat(counts)).filter(function(x){ return !x.same || Object.keys(x.v).length; }).pop();
     if(last){ c.v=JSON.parse(JSON.stringify(last.v)); c.sameAs=last.day+' '+last.moment+(last.time?' '+last.time:''); } });
   counts=counts.filter(function(c){ return c.same || Object.keys(c.v).length; });
+  /* #125: a message without a plate goes to the truck that stands at that point (kept on the phone) */
+  var PP=pointPlates(); counts.forEach(function(c){ if(!c.plate && PP[c.point]){ c.plate=PP[c.point]; c.plateFrom='phone'; } });
   counts.forEach(function(c){ c.id=countId(c)+(c.same?'-same':''); });
   notes.forEach(function(x){ x.kind='note'; x.src='wa'; x.at=atOf(x.day,x.time); x.id='N'+x.day.replace(/\D/g,'')+'-'+(x.time||'')+'-'+x.text.slice(0,30); });
   return {counts:counts, notes:notes, skipped:skipped};
@@ -626,8 +663,13 @@ function pasteSheet(){
     '<p class="hint">בוואטסאפ: לחיצה ארוכה על ההודעה הראשונה של אייל, לסמן את כל ההודעות של הספירה, ״העתק״ — ולהדביק כאן. אפשר גם הודעה אחת.</p>'+
     '<textarea class="inp" id="pasteTxt" style="min-height:160px" placeholder="[5:57, 4.10.2026] אייל: רמפה כניסה&#10;44 גמ&#10;76 ק״מ …"></textarea>'+
     '<button class="btn btn-ghost btn-sm" type="button" id="pasteRead">קרא</button><div id="pasteOut"></div>'+
+    ppEditor()+
     '<button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
 }
+/* #125: which truck stands at each point — learnt from counts with a plate, and fixed here by hand */
+function ppEditor(){ var m=pointPlates();
+  return '<details class="amg"><summary>🛻 איזו משאית בכל נקודה</summary>'+['me','eyal','yoram','truck3'].map(function(k){ return '<div class="field"><label class="lbl" for="pp-'+k+'">'+esc(POINTS[k])+'</label><input class="inp num" id="pp-'+k+'" data-pp="'+k+'" inputmode="numeric" autocomplete="off" value="'+esc(m[k]||'')+'" placeholder="מספר רישוי"></div>'; }).join('')+
+    '<button class="btn btn-ghost btn-sm" type="button" id="ppSave">שמור</button></details>'; }
 function pasteRead(){
   var p=parseCounts(document.getElementById('pasteTxt').value), L=countLog(), box=document.getElementById('pasteOut'); draft.parsed=p;
   if(!p.counts.length && !p.notes.length){ box.innerHTML='<p class="err">לא מצאתי ספירות. כל ספירה מתחילה בשורה כמו ״רמפה כניסה״ ואחריה ״44 גמ״.</p>'; return; }
@@ -749,7 +791,7 @@ function confirmFault(){
     '<p class="hint">המשרד מקבל התראה בדף המשרד. בלי קליטה — הדיווח יישלח כשתחזור.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   draft=null;
 }
-function cin(k,label){ return '<input class="cin num" id="c-'+k+'" data-cin="'+k+'" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" aria-label="'+label+'">'; }
+function cin(k,label,val){ return '<input class="cin num" id="c-'+k+'" data-cin="'+k+'"'+(val?' value="'+val+'"':'')+' inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" aria-label="'+label+'">'; }
 function updateCountMsg(){
   var el=document.getElementById('cMsg'); if(!el || !draft) return;
   el.textContent=countMsg({point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v});
@@ -974,28 +1016,67 @@ async function fillHoods(){ if(hoodBusy) return; hoodBusy=true; var n=0;
 function sendLiveSoon(){ try{ if(typeof scheduleLive==='function') scheduleLive(); }catch(e){} }
 /* FEEDBACK #36/#37: a customer can have several named delivery points ("בית", "משק"). The first one is the default;
    a stop split into two points carries the name of its point in s.point. */
+/* FEEDBACK #118 (נדיר, 22/10): "a place I marked on the map still does not bring me there the next time". Three causes:
+   (1) the default was always the FIRST point — a point added later ("הוסף נקודה נוספת") was never used again;
+   (2) a mark was kept only with "✓ סופק" — "לא סופק", or a sheet closed, lost it;
+   (3) the server kept a customer's whole record by "newest wins": another phone that touched the same customer (a stand
+       photo, a parking note) sent its old copy and erased the mark — for every driver.
+   Now a mark is saved the moment it is made and becomes the customer's default (m.def); every point carries the time it
+   was set (t); phones and the server merge one customer's record point by point — the newer point wins, none is lost. */
 function ptsOf(cust){ var m=state.memory[cust]; if(!m) return []; if(!m.points) m.points = m.lat ? [{name:'', lat:m.lat, lon:m.lon}] : []; return m.points; }
-function ptOf(s){ var P=ptsOf(s.cust); return s.point ? P.filter(function(p){ return p.name===s.point; })[0] || null : P[0] || null; }
+function defPt(cust){ var P=ptsOf(cust), d=(state.memory[cust]||{}).def; return (d && P.filter(function(p){ return p.name===(d.name||''); })[0]) || P[0] || null; }
+function ptOf(s){ var P=ptsOf(s.cust); return s.point ? P.filter(function(p){ return p.name===s.point; })[0] || null : defPt(s.cust); }
+/* two copies of one customer's record → one: the other fields from the newer copy, the points one by one by their own time
+   (the same function is in server/src/index.js — keep the two alike) */
+function mergePlace(a, b){ a=a||{}; b=b||{};
+  var nw=(b.u||0)>(a.u||0) ? b : a, old=nw===a ? b : a, out=Object.assign({}, old, nw), by={}, order=[];
+  var pts=function(m){ return Array.isArray(m.points) ? m.points : m.lat ? [{name:'', lat:m.lat, lon:m.lon}] : []; };
+  pts(nw).concat(pts(old)).forEach(function(p){ if(!p || typeof p!=='object') return; var k=p.name||'', q=by[k]; if(!q){ order.push(k); by[k]=p; } else if((p.t||0)>(q.t||0)) by[k]=p; });
+  /* a point that was given a name ("" → "בית") must not come back unnamed from an older copy: an unnamed point on the same
+     spot as a newer named one is the same point (Jarvis's review of #16) */
+  var u0=by['']; if(u0 && order.some(function(k){ var q=by[k]; return k!=='' && Math.abs(q.lat-u0.lat)<1e-6 && Math.abs(q.lon-u0.lon)<1e-6 && (q.t||0)>(u0.t||0); })) order=order.filter(function(k){ return k!==''; });
+  /* a rename leaves its old name in "gone" with the time — so the old name stays gone even after the point was moved
+     (then it is no longer on the same spot); a point set under that name later than that comes back (Jarvis, #16) */
+  var gone=Object.assign({}, old.gone||{}); Object.keys(nw.gone||{}).forEach(function(k){ gone[k]=Math.max(gone[k]||0, nw.gone[k]); });
+  if(Object.keys(gone).length){ out.gone=gone; order=order.filter(function(k){ return !(gone[k]!=null && (by[k].t||0)<=gone[k]); }); }
+  out.points=order.map(function(k){ return by[k]; }).slice(0,12); delete out.lat; delete out.lon;
+  if(a.def || b.def) out.def=!a.def ? b.def : !b.def ? a.def : (b.def.t||0)>(a.def.t||0) ? b.def : a.def;
+  out.u=Math.max(a.u||0, b.u||0); return out; }
+function canon(v){ if(Array.isArray(v)) return '['+v.map(canon).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().filter(function(k){ return v[k]!==undefined; }).map(function(k){ return JSON.stringify(k)+':'+canon(v[k]); }).join(',')+'}';
+  return JSON.stringify(v); }
+function samePlace(a, b){ var x=Object.assign({}, a||{}), y=Object.assign({}, b||{}); delete x.u; delete y.u; return canon(x)===canon(y); }
 /* FEEDBACK #42: every change to a customer's saved points / parking note is sent to the server (one row per customer,
    shared by all the drivers), and a new phone pulls them all. The newest change wins. */
 function touchPlace(cust){ if(!cust || /^hot-/.test(cust) || !state.memory[cust]) return; state.memory[cust].u=Date.now();
   var dt=placesDirty(); if(dt.indexOf(cust)<0){ dt.push(cust); try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(dt)); }catch(e){} } }
 function placesDirty(){ try{ return JSON.parse(localStorage.getItem('gazgal-places-dirty')||'[]')||[]; }catch(e){ return []; } }
+/* #118: first take what the server has and merge it point by point (a newer copy no longer hides the server's marks),
+   then send what this phone has that the server does not — so an old copy can never erase a mark */
+var placesBusy=false;
 async function syncPlaces(){
-  if(!BOT_API || bot.status!=='active') return;
-  var dt=placesDirty();
-  if(dt.length){ try{
-    var items=dt.filter(function(k){ return state.memory[k]; }).map(function(k){ return {cust:k, data:state.memory[k], u:state.memory[k].u||Date.now()}; });
-    var r=await botFetch('/api/places',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({items:items})});
-    if(r.ok){ var left=placesDirty().filter(function(k){ return dt.indexOf(k)<0; }); try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(left)); }catch(e){} }
-  }catch(e){} }
+  if(!BOT_API || bot.status!=='active' || placesBusy) return; placesBusy=true;
   try{
-    var since=+(localStorage.getItem('gazgal-places-since')||0), r2=await botFetch('/api/places?since='+since); if(!r2.ok) return;
-    var j=await r2.json(), changed=0;
-    (j.items||[]).forEach(function(it){ var m=state.memory[it.cust]; if(!m || (m.u||0)<it.u){ state.memory[it.cust]=Object.assign(it.data||{}, {u:it.u}); changed++; } });
-    try{ localStorage.setItem('gazgal-places-since', String(j.now||Date.now())); }catch(e){}
-    if(changed){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+    var since=+(localStorage.getItem('gazgal-places-since')||0), r2=await botFetch('/api/places?since='+since);
+    if(r2.ok){ var j=await r2.json(), changed=0, dt=placesDirty();
+      (j.items||[]).forEach(function(it){ var loc=state.memory[it.cust], rem=Object.assign({}, it.data||{}, {u:it.u});
+        if(!loc){ state.memory[it.cust]=rem; changed++; return; }
+        var mg=mergePlace(loc, rem); if(!samePlace(mg, loc)){ state.memory[it.cust]=mg; changed++; }
+        /* the server lacks something: send the merged copy, newer than the server's (also a server still on "newest wins" takes it) */
+        if(!samePlace(mg, rem)){ mg.u=Date.now(); state.memory[it.cust]=mg; if(dt.indexOf(it.cust)<0) dt.push(it.cust); } });
+      try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(dt)); localStorage.setItem('gazgal-places-since', String(j.now||Date.now())); }catch(e){}
+      if(changed){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} if(!document.querySelector('.scrim')) render(); } }
   }catch(e){}
+  var dt2=placesDirty();
+  if(dt2.length){ try{
+    var items=dt2.filter(function(k){ return state.memory[k]; }).map(function(k){ return {cust:k, data:state.memory[k], u:state.memory[k].u||Date.now()}; });
+    var r=await botFetch('/api/places',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({items:items})});
+    if(r.ok){ var jr={}; try{ jr=await r.json(); }catch(e){}
+      /* what the server did not take (too big / lost a race 4 times) stays to be sent again */
+      var keep=(jr.rejected||[]).concat(jr.failed||[]).map(String);
+      var left=placesDirty().filter(function(k){ return dt2.indexOf(k)<0 || keep.indexOf(String(k).replace(/\D/g,''))>=0; }); try{ localStorage.setItem('gazgal-places-dirty', JSON.stringify(left)); }catch(e){} }
+  }catch(e){} }
+  placesBusy=false;
 }
 /* FEEDBACK #42: stand photos go to the server too (Nadir: "תמונות עמדות כן, צ'קים לא" — cheque photos stay on the
    phone only). memory.ph = when the photo was taken; a phone that has an older one (or none) fetches it for today's stops. */
@@ -1024,7 +1105,7 @@ async function learnPlace(c){
     /* moving = marked from the road after leaving; a town-only estimate allows a wide radius, so this is the real guard */
     if((pos.coords.accuracy||999)>40 || (pos.coords.speed||0)>2 || dist(c.pt,ll)>(c.geoHow==='רחוב'?1.5:6) || ptOf(c)) return;
     state.memory[c.cust]=state.memory[c.cust]||{}; var P=ptsOf(c.cust);
-    P.push({name:c.point||'', lat:Math.round(ll[0]*1e5)/1e5, lon:Math.round(ll[1]*1e5)/1e5, acc:Math.round(pos.coords.accuracy), auto:1});
+    P.push({name:c.point||'', lat:Math.round(ll[0]*1e5)/1e5, lon:Math.round(ll[1]*1e5)/1e5, acc:Math.round(pos.coords.accuracy), auto:1, t:1});   /* t:1 — a guess never wins over a driver's mark (#118) */
     touchPlace(c.cust); save(); toast('📍 נשמר המיקום של '+c.name+' — מהפעם הבאה הסידור מדויק');
   }catch(e){}
 }
@@ -1185,8 +1266,7 @@ async function mapPick(c){
   box.querySelector('#mpMe').onclick=function(){ here().then(function(p){ map.setView([p.coords.latitude,p.coords.longitude], 18); }).catch(function(){ toast('אין מיקום מהטלפון — הזז את המפה ידנית'); }); };
   box.querySelector('#mpOk').onclick=function(){ var m=map.getCenter(); close();
     if(!draft || draft.stop!==c.id) return;
-    acceptGeo({coords:{latitude:m.lat, longitude:m.lng, accuracy:10}}, 10); draft.geoSrc='map';
-    var gm=document.getElementById('gpsMsg'); if(gm){ gm.textContent='✓ סומן על המפה. יישמר עם אישור האספקה.'; gm.style.color='var(--ok)'; } };
+    draft.geoSrc='map'; acceptGeo({coords:{latitude:m.lat, longitude:m.lng, accuracy:10}}, 10); };
 }
 /* FEEDBACK #61/#67: a saved point must come from the GPS where the driver stands now — not a fix cached while driving,
    and not the phone's cell-tower guess (±1–2 km). Watch until the fix is good enough (or time runs out) and keep the best. */
@@ -1200,18 +1280,49 @@ function preciseFix(want, ms, onProgress){ return new Promise(function(res,rej){
     function(err){ if(err && err.code===1 && !done){ done=true; clearTimeout(t); try{ navigator.geolocation.clearWatch(id); }catch(e){} rej(new Error('denied')); } },
     {enableHighAccuracy:true, maximumAge:0}); }catch(e){ return rej(e); }
   t=setTimeout(end, ms); }); }
-function acceptGeo(pos, acc){ if(!draft) return; var gm=document.getElementById('gpsMsg');
-  draft.geo=[pos.coords.latitude, pos.coords.longitude]; draft.geoAcc=acc;
-  if(gm){ gm.textContent='✓ נקלט (דיוק ±'+acc+' מ׳). יישמר עם אישור האספקה.'; gm.style.color='var(--ok)'; }
-  var gc=byId(draft.stop), ex=gc && ptOf(gc);
-  /* FEEDBACK #37: a new location never silently replaces the saved one */
-  if(ex){ draft.geoMode=null; document.getElementById('geoBox').innerHTML='<div class="chips" role="group" aria-label="מה לעשות עם המיקום">'+
-      '<button type="button" class="chip" data-geomode="replace" aria-pressed="false">החלף את '+esc(ex.name||'המיקום השמור')+'</button>'+
-      '<button type="button" class="chip" data-geomode="add" aria-pressed="false">הוסף נקודה נוספת</button></div>'+
-      '<div id="geoAdd" hidden><div class="field"><label for="geoName">שם הנקודה החדשה</label><input class="inp" id="geoName" autocomplete="off" placeholder="למשל: משק"></div>'+
-      (!ex.name?'<div class="field"><label for="geoOld">שם למיקום שכבר שמור</label><input class="inp" id="geoOld" autocomplete="off" value="בית"></div>':'')+'</div>'; }
-  else draft.geoMode='add';
+/* #118: a place the driver marks (GPS where he stands / the pin on the map) is saved at once — not with "✓ סופק" — and
+   becomes where Waze and the order go for this customer from now on. mode 'replace' = the point used now; 'add' = a point
+   by the name nm (oldNm names the old unnamed one). Returns the point. */
+function savePlace(c, ll, acc, mode, nm, oldNm, src){
+  var m=state.memory[c.cust]=state.memory[c.cust]||{}, P=ptsOf(c.cust), now=Date.now(), ex=ptOf(c), p;
+  if(mode==='replace' && ex) p=ex;
+  else { var name=c.point || nm || ''; if(oldNm && P.length && !P[0].name){ P[0].name=oldNm; P[0].t=now; m.gone=Object.assign(m.gone||{}, {'':now}); }
+    p=P.filter(function(x){ return (x.name||'')===name; })[0]; if(!p){ p={name:name}; P.push(p); } }
+  p.lat=Math.round(ll[0]*1e6)/1e6; p.lon=Math.round(ll[1]*1e6)/1e6; p.acc=acc; p.t=now; delete p.auto; if(src) p.src=src; else delete p.src;
+  if(!c.point) m.def={name:p.name||'', t:now};
+  c.pt=[p.lat, p.lon]; c.geoHow='חנייה שמורה'; delete c.hood;
+  touchPlace(c.cust); save(); if(!/^hot-/.test(c.cust)) setTimeout(function(){ syncPlaces(); }, 0);
+  return p; }
+function geoSaved(c, p, how){ var gm=document.getElementById('gpsMsg'); if(!gm) return;
+  gm.innerHTML='✓ '+how+' ונשמר'+(p.name?' ('+esc(p.name)+')':'')+'. '+(/^hot-/.test(c.cust)
+    ? '<b>אין מספר צרכן — המיקום נשמר רק להיום.</b>' : 'מהפעם הבאה Waze והסידור ייקחו לכאן, אצל כל הנהגים.');
+  gm.style.color='var(--ok)'; draft.geoSaved=true; }
+function acceptGeo(pos, acc){ if(!draft) return; var gc=byId(draft.stop); if(!gc) return;
+  var ll=[pos.coords.latitude, pos.coords.longitude], ex=ptOf(gc), src=draft.geoSrc||'', how=src==='map'?'סומן על המפה':'נקלט (±'+acc+' מ׳)', box=document.getElementById('geoBox');
+  draft.geoSrc=null; if(box) box.innerHTML='';
+  /* FEEDBACK #37: a customer with NAMED points ("בית", "משק") — the driver says which one, or a new one. Otherwise a mark
+     replaces the point used now: it was marked because that point is wrong (a guess, or a mark from the wrong spot). */
+  var named=ptsOf(gc.cust).some(function(p){ return p.name; });
+  if(!ex || !named || gc.point){ var old=ex ? {lat:ex.lat, lon:ex.lon, acc:ex.acc, t:ex.t, auto:ex.auto, src:ex.src} : null;
+    var p=savePlace(gc, ll, acc, 'replace', '', '', src); geoSaved(gc, p, how);
+    /* "this is a second place, not a correction" — the old point comes back, and the new one gets a name */
+    if(old && box && !ex.auto) box.innerHTML='<button type="button" class="btn btn-ghost btn-sm" data-geoasnew="1">➕ זו נקודה נוספת של הלקוח (למשל משק), לא תיקון</button>';
+    draft.geoPending={ll:ll, acc:acc, src:src, how:how, old:old}; return; }
+  draft.geoPending={ll:ll, acc:acc, src:src, how:how};
+  var gm=document.getElementById('gpsMsg'); if(gm){ gm.textContent='✓ '+how+'. לאיזו נקודה?'; gm.style.color='var(--ok)'; }
+  box.innerHTML=geoChoice(gc);
 }
+/* the "📍 מיקום חנייה" block — in "סופק" and in "לא סופק" */
+function geoBlock(c){ var dpt=ptOf(c);
+  return '<div class="field"><span class="lbl">📍 מיקום חנייה'+(c.point?' — '+esc(c.point):'')+'</span><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(dpt?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" id="mapPark">🗺 סמן על המפה</button></div>'+
+      '<p class="hint" id="gpsMsg">'+(dpt?'יש מיקום שמור'+(dpt.name?' ('+esc(dpt.name)+')':'')+(dpt.auto?' (נלמד אוטומטית — אם הוא לא מדויק, סמן על המפה)':'')+'. סימון חדש מחליף אותו מיד.':'עומד בחנייה הנכונה? שמור, ומהפעם הבאה Waze והסידור ישתמשו בו.')+'</p><div id="geoBox"></div></div>'; }
+function geoChoice(gc){ var P=ptsOf(gc.cust);
+  return '<div class="chips" role="group" aria-label="לאיזו נקודה">'+P.map(function(p,i){ return '<button type="button" class="chip" data-geoto="'+i+'" aria-pressed="false">'+esc(p.name||'המיקום השמור')+'</button>'; }).join('')+
+    '<button type="button" class="chip" data-geonew="1" aria-pressed="false">➕ נקודה חדשה</button></div>'+
+    '<div id="geoAdd" hidden><div class="field"><label for="geoName">שם הנקודה החדשה</label><input class="inp" id="geoName" autocomplete="off" placeholder="למשל: משק"></div>'+
+    (P.length && !P[0].name?'<div class="field"><label for="geoOld">שם למיקום שכבר שמור</label><input class="inp" id="geoOld" autocomplete="off" value="בית"></div>':'')+
+    '<button type="button" class="btn btn-ghost btn-sm" id="geoAddSave">💾 שמור נקודה</button><p class="err" id="geoErr" hidden></p></div>'; }
 function here(){ return new Promise(function(res,rej){ if(!navigator.geolocation) return rej(new Error('no geo'));
   navigator.geolocation.getCurrentPosition(function(p){ res(p); }, rej, {enableHighAccuracy:true, timeout:12000, maximumAge:30000}); }); }
 async function startPoint(fromHere){
@@ -1831,6 +1942,9 @@ function inboxBtn(){
    With no count today, it starts from yesterday's balance, the same as the end-of-day reconciliation. */
 function truckNow(){
   var mine=state.counts.filter(function(c){ return c.point===ME() && idMs(c); }), last=mine[mine.length-1];
+  /* #125: after a truck swap the truck is the new one — it starts from what the swap sheet says it had */
+  var sws=(state.facility||[]).filter(function(f){ return f.swap && f.newV; }), lsw=sws[sws.length-1];
+  if(lsw && (!last || idMs(lsw)>idMs(last))) last={id:lsw.id, v:lsw.newV, moment:'החלפה ל־'+(lsw.truck||''), time:lsw.time};
   if(!last){ var ex=report().exp; return ex ? {v:ex, from:'מהיתרות של אתמול', n:done().filter(function(x){ return x.status==='delivered'; }).length} : null; }
   var t=idMs(last), v={gm:last.v.gm||0, km:last.v.km||0, gr:last.v.gr||0, kr:last.v.kr||0}, n=0;
   (state.facility||[]).forEach(function(f){ if(idMs(f)>t){ var d=moveOf(f); CF.forEach(function(x){ v[x.k]+=d[x.k]; }); } });
@@ -2030,8 +2144,8 @@ function truckCard(){
 function viewStock(){
   return '<main><div class="hero"><span class="eyebrow">ספירות מלאי</span><h1>מלאי</h1></div>'+truckCard()+fleetBtns()+countsLogCard()+
   '<div class="grid2"><button class="btn btn-accent btn-sm" type="button" data-sheet="count">+ ספירה חדשה</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility">🏭 מחסן / מתקן</button></div>'+
-  (state.phase==='route'?'<button class="btn btn-ghost btn-sm" type="button" data-sheet="facility" data-preset="swap">🔄 החלפת משאית באמצע היום</button>':'')+''+
-  (state.facility.length?'<section class="card"><h3>מחסן ומתקן היום</h3>'+state.facility.map(function(f){
+  '<div class="grid2"><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility" data-preset="swap">🔄 החלפת משאית</button><button class="btn btn-ghost btn-sm" type="button" data-sheet="facility" data-preset="נהג">🤝 העברה עם נהג</button></div>'+
+  (state.facility.length?'<section class="card"><h3>מחסן, מתקן והעברות היום</h3>'+state.facility.map(function(f){
     return '<div class="sec" style="margin:0"><span><b class="num">'+esc(f.time)+'</b> · '+esc(mvText(f).join(' · ')||'אין שינוי')+(f.swap&&!f.newV?' · הוחלפה משאית'+(f.truck?' '+esc(f.truck):''):'')+(f.pink?' · 📄':'')+'</span>'+
       '<button class="btn btn-ghost btn-sm" style="min-height:36px" type="button" data-delfac="'+esc(f.id)+'">מחק</button></div>'; }).join('')+'</section>':'')+
   countsList()+'</main>';
@@ -2124,6 +2238,8 @@ function mvText(f){
   if(f.swap && f.newV) return [swapText(f)];
   var m=f.mv||{}, W=f.where==='רמפה'?'במחסן':'במתקן';
   var part=function(k,suf){ return [2,1].map(function(sz){ var n=(m[k]||{})[sz]||0; return n ? n+'×'+(sz===2?'48':'12')+' '+suf : ''; }).filter(Boolean); };
+  if(f.where==='נהג'){ var who=POINTS[f.to]||f.to||'נהג', gave=part('uf','מלאים').concat(part('ue','ריקים')), got=part('lf','מלאים').concat(part('le','ריקים')), T=[];   /* #125 */
+    if(gave.length) T.push('נתתי ל'+who+' '+gave.join(', ')); if(got.length) T.push('קיבלתי מ'+who+' '+got.join(', ')); return T; }
   var ld=part('lf','מלאים').concat(part('le','ריקים')), ul=part('ue','ריקים').concat(part('uf','מלאים')), P=[];
   if(ld.length) P.push('העמסתי '+W+' '+ld.join(', '));
   if(ul.length) P.push('הורדתי מהמשאית '+W+' '+ul.join(', '));
@@ -2161,6 +2277,29 @@ function report(){
   fac.forEach(function(f){ if(base && idMs(f)<base.t) return; var d=moveOf(f), into=(!firstAt || idMs(f)<firstAt) ? early : later; CF.forEach(function(x){ into[x.k]+=d[x.k]; }); });
   var opening = base ? {gm:(base.v.gm||0)+early.gm, km:(base.v.km||0)+early.km, gr:(base.v.gr||0)+early.gr, kr:(base.v.kr||0)+early.kr} : null;
   var exp = opening ? {gm:opening.gm+later.gm-q[2], km:opening.km+later.km-q[1], gr:opening.gr+later.gr+e[2]+loan[2], kr:opening.kr+later.kr+e[1]+loan[1]} : null;
+  /* #125: a day with truck swaps is reconciled truck by truck — each truck from its start (the morning exit; after a swap, the
+     count right after it, else what the swap sheet says the new truck had) to what came back at the next swap. The day's end
+     then compares only the last truck, so one truck's gap is not carried into the next one. */
+  var swaps=fac.filter(function(f){ return f.swap && f.newV; }).sort(function(a,b){ return idMs(a)-idMs(b); }), legs=[];
+  if(swaps.length && base){
+    var cp=function(v){ return {gm:(v||{}).gm||0, km:(v||{}).km||0, gr:(v||{}).gr||0, kr:(v||{}).kr||0}; };
+    var run=function(seg, toT){ var v=cp(seg.v);
+      fac.forEach(function(f){ var ft=idMs(f); if((f.swap && f.newV) || ft<=seg.t || ft>=toT || (seg.first && (!firstAt || ft<firstAt))) return; var d=moveOf(f); CF.forEach(function(x){ v[x.k]+=d[x.k]; }); });
+      state.stops.forEach(function(x){ var r=x.result; if(x.status!=='delivered' || !r || !r.at || r.at<seg.dt || r.at>=toT) return;
+        v.km-=qtyOf(x,'1',true); v.gm-=qtyOf(x,'2',true); v.kr+=((r.empties||{})[1]||0)+((r.loan||{})[1]||0); v.gr+=((r.empties||{})[2]||0)+((r.loan||{})[2]||0); });
+      return v; };
+    var o0=cp(base.v); fac.forEach(function(f){ var ft=idMs(f); if((f.swap && f.newV) || ft<base.t) return; if(!firstAt || ft<firstAt){ var d=moveOf(f); CF.forEach(function(x){ o0[x.k]+=d[x.k]; }); } });
+    opening=o0;
+    var seg={v:o0, t:base.t, dt:0, first:true, plate:(open && open.plate)||swaps[0].fromTruck||''};
+    swaps.forEach(function(sw,i){ var tS=idMs(sw), nextT=i+1<swaps.length ? idMs(swaps[i+1]) : Infinity, ex=run(seg, tS);
+      legs.push({plate:sw.fromTruck||seg.plate, time:sw.time, label:'הוחזרה '+sw.time, exp:ex, got:cp(sw.oldV), gap:cDiff(ex, cp(sw.oldV))});
+      var cnt=state.counts.filter(function(c){ var ct=idMs(c); return c.point===ME() && (c.moment==='יציאה' || c.moment==='ספירה ביניים') && ct>tS && ct<nextT; })[0];
+      seg={v:cp(sw.newV), t:tS, dt:tS, plate:sw.truck};
+      /* the new truck from the swap to the count after it (deliveries, a hand-over or the ramp may come between) — checked too */
+      if(cnt){ var ec=run(seg, idMs(cnt)); legs.push({plate:cnt.plate||sw.truck, time:cnt.time, label:'מההחלפה עד הספירה ב־'+cnt.time, exp:ec, got:cp(cnt.v), gap:cDiff(ec, cp(cnt.v))});
+        seg={v:cp(cnt.v), t:idMs(cnt), dt:idMs(cnt), plate:cnt.plate||sw.truck}; } });
+    exp=run(seg, Infinity);
+  }
   var nos=journalNos(), groups=nos.map(function(no){ return {no:no, stops:[]}; }), other={};
   state.stops.forEach(function(s){
     if(s.fromJournal){ if(!s.splitOf) (other[s.fromJournal]=other[s.fromJournal]||[]).push(mergedStop(s)); return; }
@@ -2168,7 +2307,7 @@ function report(){
     var g=groups.filter(function(x){ return x.no===(s.journal||nos[0]); })[0]||groups[0]; g.stops.push(mergedStop(s)); });
   Object.keys(other).forEach(function(no){ groups.push({no:no, from:true, stops:other[no]}); });
   groups.forEach(function(g){ g.stops.sort(function(a,b){ return (a.row||999)-(b.row||999); }); });
-  return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, loan:loan, loans:loans, t:cashTotals(), open:open, opening:opening, fromExit:byTruck || (!prev && !!open), mm:mm, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
+  return { del:del, fail:fail, by:by, q:q, e:e, pb:pb, amg:amg, kits:kits, loan:loan, loans:loans, t:cashTotals(), open:open, opening:opening, legs:legs, fromExit:byTruck || (!prev && !!open), mm:mm, eve:eve, exp:exp, prev:prev, fac:fac, groups:groups,
     LBL:{collect:'באספקה (נגבה בשטח)', paid:'שולם מראש', credit:'אשראי / הוראת קבע'},
     hot:state.stops.filter(function(s){ return s.hot; }), openStops:pending(), changed:del.filter(changed),
     transfers:state.stops.filter(function(s){ return s.fromJournal; }), tasks:state.stops.filter(function(s){ return s.kind==='task'; }) };
@@ -2211,6 +2350,7 @@ function reportText(R){
   if(R.openStops.length){ L.push(''); L.push('לא טופלו: '+R.openStops.map(function(s){ return s.name; }).join(', ')); }
   if(R.tasks.length){ L.push(''); L.push('🛠 מטלות:'); R.tasks.forEach(function(s){ L.push('• '+taskLine(s)); }); }
   if(R.transfers.length){ L.push(''); L.push('למשוך מיומנים אחרים: '+R.transfers.map(function(s){ return (s.orderNo||s.id)+' מיומן '+s.fromJournal; }).join(' · ')); }
+  (R.legs||[]).forEach(function(g,i){ if(!i) L.push(''); L.push('משאית '+(g.plate||'')+' ('+g.label+') — צפוי / נספר: '+CF.map(function(f){ return f.l+' '+g.exp[f.k]+'/'+g.got[f.k]; }).join(' · ')+(g.gap?' · ⚠ פער: '+g.gap:' · ✓')); });
   if(R.exp && R.eve){ L.push(''); L.push('מלאי משאית — צפוי / נספר בסוף יום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]+'/'+(R.eve.v[f.k]||0); }).join(' · ')); }
   if(state.dayNote){ L.push(''); L.push('הערות: '+state.dayNote); }
   return L.join('\n');
@@ -2255,7 +2395,7 @@ function docHtml(){
       '<div><div class="sec2" style="margin-top:0">מכירת גז</div><table>'+pairHead()+pair('פתיחה:', o?o.km:'', o?o.gm:'')+pair('סיום:', ev?ev.km||0:'', ev?ev.gm||0:'')+pair('מכירה:', R.q[1], R.q[2], true)+'</table></div>'+
     '</div>'+
     (o ? '<div style="font-size:11.5px;color:#444;margin:-4px 0 6px">פתיחה = '+(R.fromExit?'ספירת היציאה מהבוקר':'היתרות מיום קודם')+(R.fac.length?' + מה שהועמס / נפרק לפני האספקה הראשונה':'')+'.</div>' : '')+
-    (R.exp ? '<div style="margin:-2px 0 8px">'+recon(R)+'</div>' : '')+
+    (R.exp ? '<div style="margin:-2px 0 8px">'+legsHtml(R)+recon(R)+'</div>' : '')+
     '<div class="row2">'+
       '<table>'+pairHead()+pair('שיקים', R.pb.cheque[1], R.pb.cheque[2])+pair('מזומן', R.pb.cash[1], R.pb.cash[2])+pair('קבלות', R.pb.rcpt[1], R.pb.rcpt[2])+'</table>'+
       '<table>'+
@@ -2338,6 +2478,7 @@ function autoNotes(R){
   if(R.groups.filter(function(g){ return !g.from; }).length>1) L.push('הסגירה מאחדת '+journalNos().length+' יומנים: '+esc(journalNos().join(', ')));
   return L.length ? '<ul>'+L.map(function(x){ return '<li>'+x+'</li>'; }).join('')+'</ul>' : '<div>אין.</div>';
 }
+function legsHtml(R){ return (R.legs||[]).map(function(g){ return '<div style="font-size:12.5px">משאית <b class="num">'+esc(g.plate||'')+'</b> ('+esc(g.label)+') — צפוי מול נספר: '+CF.map(function(f){ return f.l+' '+g.exp[f.k]+'/'+g.got[f.k]; }).join(' · ')+' — '+(g.gap?'<span class="bad2">פער: '+esc(g.gap)+'</span>':'<span class="ok2">✓ מתאים</span>')+'</div>'; }).join(''); }
 function recon(R){
   if(!R.eve) return '<span style="font-size:12px">צפוי על המשאית בסוף היום: '+CF.map(function(f){ return f.l+' '+R.exp[f.k]; }).join(' · ')+' (אין ספירת סוף יום)</span>';
   var bad=CF.filter(function(f){ return R.exp[f.k]!==(R.eve.v[f.k]||0); });
@@ -2508,7 +2649,7 @@ function viewEnd(){
     '<div id="hoMsg">'+hoMsg(R)+'</div>'+
     '<div class="field" id="hoNoteBox"'+(hoGap(R)?'':' hidden')+'><label for="hoNote">הסבר לפער (חובה)</label><textarea class="inp" id="hoNote" placeholder="למשל: 50 ₪ עודף מלקוח X נשארו אצלי">'+esc(state.handover.note||'')+'</textarea></div></div>'+
   (R.groups.length>1?'<div>'+R.groups.map(function(g){ var d=g.stops.filter(function(s){ return s.status==='delivered'; }).length; return '<span class="tag t-info num" style="margin-inline-end:6px">'+(g.from?'מיומן '+esc(g.no):'יומן '+esc(g.no))+' · '+d+'/'+g.stops.length+'</span>'; }).join('')+'</div>':'')+
-  '<div><b>התאמת מלאי — המשאית</b>'+
+  '<div><b>התאמת מלאי — המשאית</b>'+legsHtml(R)+
   (R.exp && R.eve
     ? '<div class="tbl"><table><tbody>'+CF.map(function(f){ return '<tr><td>'+f.d+' ('+f.l+')</td><td class="v">'+cmp(R.exp[f.k], R.eve.v[f.k]||0)+'</td></tr>'; }).join('')+'</tbody></table></div>'+
       '<p class="hint">צפוי = '+(R.fromExit?'ספירת ה״יציאה״ של הבוקר':'היתרות מיום קודם')+(R.fac.length?', ועוד מה שהועמס / נפרק במחסן ובמתקן':'')+', פחות מלאים שנמכרו, ועוד ריקים שנאספו.</p>'
@@ -2635,6 +2776,8 @@ function openSheet(kind,preset){
   if(kind==='count'){
     var pr=(preset||'').split('|'), pt=pr[0]||ME(), mo=pr[1]||nextMoment(pt);
     draft={point:pt, pointText:'', moment:mo, v:{}, plate:myPlate()};
+    /* #125: "ספירה עכשיו" after a load / unload / hand-over / swap — filled in from the app, the driver only corrects */
+    var pre=pr[2]==='now' && pt===ME() ? truckNow() : null; if(pre) CF.forEach(function(f){ var n=Math.max(0, pre.v[f.k]||0); if(n) draft.v[f.k]=n; });
     html='<h2>ספירת מלאי</h2>'+
     '<div class="field"><span class="lbl">איפה סופרים</span><div class="chips" role="group" aria-label="נקודת ספירה">'+
       [ME()].concat(['me','eyal','yoram','truck3','ramp','other'].filter(function(k){ return k!==ME(); })).map(function(k){ return '<button type="button" class="chip" data-cpoint="'+k+'" aria-pressed="'+(k===pt)+'">'+pointBtn(k)+'</button>'; }).join('')+'</div>'+
@@ -2647,8 +2790,9 @@ function openSheet(kind,preset){
     '<div class="field"><span class="lbl">מתי</span><div class="chips" role="group" aria-label="מתי">'+
       MOMENTS.map(function(m){ return '<button type="button" class="chip" data-cmom="'+m+'" aria-pressed="'+(m===mo)+'">'+m+'</button>'; }).join('')+'</div></div>'+
     '<div class="cgrid"><span></span><span class="h">גדול · 48</span><span class="h">קטן · 12</span>'+
-      '<span class="r">מלא</span>'+cin('gm','גדול מלא')+cin('km','קטן מלא')+
-      '<span class="r">ריק</span>'+cin('gr','גדול ריק')+cin('kr','קטן ריק')+'</div>'+
+      '<span class="r">מלא</span>'+cin('gm','גדול מלא',draft.v.gm)+cin('km','קטן מלא',draft.v.km)+
+      '<span class="r">ריק</span>'+cin('gr','גדול ריק',draft.v.gr)+cin('kr','קטן ריק',draft.v.kr)+'</div>'+
+    (pre?'<div class="note" style="font-size:13px">ממולא לפי האפליקציה ('+esc(pre.from)+'). ספור ותקן רק מה שלא נכון.</div>':'')+
     '<details class="amg"><summary>אמגזיות — 5 ו־2.5 ק״ג</summary><div class="cgrid"><span></span><span class="h">מלא</span><span class="h">ריק</span>'+
       '<span class="r">5 ק״ג</span>'+cin('a5m','אמגזית 5 מלא')+cin('a5r','אמגזית 5 ריק')+
       '<span class="r">2.5 ק״ג</span>'+cin('a25m','אמגזית 2.5 מלא')+cin('a25r','אמגזית 2.5 ריק')+'</div></details>'+
@@ -2697,28 +2841,30 @@ function openSheet(kind,preset){
       '<div id="offBox"></div>';
   }
   if(kind==='facility'){
-    draft={fac:{}, swap:preset==='swap', pink:null, where:(preset==='רמפה'?'רמפה':'מתקן'), sw:{}};
+    draft={fac:{}, swap:preset==='swap', pink:null, where:(preset==='רמפה'?'רמפה':preset==='נהג'?'נהג':'מתקן'), sw:{}, to:'', oldPlate:myPlate()};
     /* FEEDBACK #74: changing trucks mid-day — the count on the old truck as it was returned, and on the new one */
     var tn=truckNow(), swv=tn ? tn.v : {gm:0,km:0,gr:0,kr:0};
     ['gm','km','gr','kr'].forEach(function(k){ draft.sw['o-'+k]=Math.max(0,swv[k]||0); });
     var srow=function(p,k,label){ var v=draft.sw[p+'-'+k]; return '<input class="cin num" data-sw="'+p+'-'+k+'" inputmode="numeric" aria-label="'+label+'" value="'+(v!=null&&p==='o'?v:'')+'">'; };
-    var sgrid=function(p,title){ return '<div class="field"><span class="lbl">'+title+'</span><div class="cgrid"><span></span><span class="h">48 ק״ג</span><span class="h">12 ק״ג</span>'+
+    var sgrid=function(p,title){ return '<div class="field"><span class="lbl" id="sgl-'+p+'">'+title+'</span><div class="cgrid"><span></span><span class="h">48 ק״ג</span><span class="h">12 ק״ג</span>'+
       '<span class="r">מלאים</span>'+srow(p,'gm','מלאים 48')+srow(p,'km','מלאים 12')+'<span class="r">ריקים</span>'+srow(p,'gr','ריקים 48')+srow(p,'kr','ריקים 12')+'</div></div>'; };
-    var frow=function(k,label){ return '<span class="r">'+label+'</span><input class="cin num" data-fac="'+k+'-2" inputmode="numeric" aria-label="'+label+' 48"><input class="cin num" data-fac="'+k+'-1" inputmode="numeric" aria-label="'+label+' 12">'; };
-    var isR=draft.where==='רמפה';
-    html='<h2>🏭 העמסה / פריקה</h2><div class="chips" role="group" aria-label="איפה">'+['מתקן','רמפה'].map(function(w){ return '<button type="button" class="chip" data-fwhere="'+w+'" aria-pressed="'+(w===draft.where)+'">'+(w==='רמפה'?'מחסן (הרמפה באופקים)':'מתקן')+'</button>'; }).join('')+'</div>'+
-      '<div id="swBox"'+(draft.swap?'':' hidden')+'><div class="note">🔄 <b>החלפת משאית</b> — כותבים מה היה על המשאית שהחזרת ומה יש על המשאית שאתה יוצא איתה. האפליקציה מחשבת את ההפרש, וכל היום נשאר בדוח אחד.</div>'+
-        sgrid('o','על המשאית שהחזרת'+(myPlate()?' ('+esc(myPlate())+')':'')+' — לפי האפליקציה, תקן אם צריך')+
-        '<div class="field"><label for="swPlate">מספר רישוי של המשאית החדשה</label><input class="inp num" id="swPlate" inputmode="numeric" autocomplete="off"></div>'+
+    /* #125: the three trucks to choose from (the ones this phone knows, newest first) */
+    var pl=plates().slice(0,4), pchips=function(attr,sel,skip){ return pl.filter(function(p){ return p!==skip; }).map(function(p){ return '<button type="button" class="chip num" '+attr+'="'+esc(p)+'" aria-pressed="'+(p===sel)+'">'+esc(p)+'</button>'; }).join(''); };
+    var notR=draft.where==='מתקן';
+    html='<h2>🏭 העמסה / פריקה / העברה</h2><div class="chips" role="group" aria-label="איפה">'+['מתקן','רמפה','נהג'].map(function(w){ return '<button type="button" class="chip" data-fwhere="'+w+'" aria-pressed="'+(w===draft.where)+'">'+(w==='רמפה'?'מחסן (הרמפה באופקים)':w==='נהג'?'🤝 נהג אחר':'מתקן')+'</button>'; }).join('')+'</div>'+
+      /* #125: a hand-over with another driver ("נתתי לאייל 4 גמ, קיבלתי 4 קר") */
+      '<div class="field" id="drvBox"'+(draft.where==='נהג'?'':' hidden')+'><span class="lbl">עם איזה נהג</span><div class="chips" role="group" aria-label="נהג">'+
+        Object.keys(POINTS).filter(function(k){ return k!==ME() && k!=='ramp'; }).map(function(k){ return '<button type="button" class="chip" data-fto="'+k+'" aria-pressed="false">'+esc(POINTS[k])+'</button>'; }).join('')+'</div></div>'+
+      '<div id="swBox"'+(draft.swap?'':' hidden')+'><div class="note">🔄 <b>החלפת משאית</b> — כותבים מה היה על המשאית שהחזרת ומה יש על המשאית שאתה יוצא איתה. האפליקציה מחשבת את ההפרש, וכל משאית נשמרת עם מה שעליה.</div>'+
+        (pl.length?'<div class="field"><span class="lbl">המשאית שהחזרת</span><div class="chips" role="group" aria-label="המשאית שהחזרת">'+pchips('data-swold', draft.oldPlate, '')+'</div></div>':'')+
+        sgrid('o','על המשאית שהחזרת'+(draft.oldPlate?' ('+esc(draft.oldPlate)+')':'')+' — לפי האפליקציה, תקן אם צריך')+
+        '<div class="field"><label for="swPlate">המשאית החדשה</label>'+(pl.length?'<div class="chips" role="group" aria-label="המשאית החדשה" id="swNewChips">'+pchips('data-swnew', '', draft.oldPlate)+'</div>':'')+
+          '<input class="inp num" id="swPlate" inputmode="numeric" autocomplete="off" placeholder="מספר רישוי"></div>'+
         sgrid('n','על המשאית החדשה — מה יש עליה עכשיו')+'</div>'+
-      '<div id="mvBox"'+(draft.swap?' hidden':'')+'>'+
-      '<div class="field"><span class="lbl">כמה העמסתי / הורדתי</span><div class="cgrid"><span></span><span class="h">48 ק״ג</span><span class="h">12 ק״ג</span>'+
-        frow('lf','העמסתי מלאים')+frow('ue','הורדתי ריקים')+'</div>'+
-      '<details class="amg"><summary>העמסתי ריקים / הורדתי מלאים</summary><div class="cgrid"><span></span><span class="h">48 ק״ג</span><span class="h">12 ק״ג</span>'+
-        frow('le','העמסתי ריקים')+frow('uf','הורדתי מלאים')+'</div></details></div></div>'+
-      '<p class="hint">נכנס לדוח כמו שכותבים ביד, למשל ״העמסתי במתקן 12×48 מלאים · הורדתי מהמשאית 6×48 ריקים״. שדה ריק = 0.</p>'+
-      '<div class="field fonly"'+(isR?' hidden':'')+'><span class="lbl">החלפתי משאית?</span><div class="chips"><button type="button" class="chip" data-swap="0" aria-pressed="'+(!draft.swap)+'">לא</button><button type="button" class="chip" data-swap="1" aria-pressed="'+draft.swap+'">כן</button></div></div>'+
-      '<div class="field fonly"'+(isR?' hidden':'')+'><span class="lbl">הטופס הוורוד</span>'+photoPick('pink','צלם טופס')+'</div>'+
+      '<div id="mvBox"'+(draft.swap?' hidden':'')+'><div id="mvRows">'+facRows(draft.where)+'</div></div>'+
+      '<p class="hint">נכנס לדוח כמו שכותבים ביד, למשל ״העמסתי במתקן 12×48 מלאים · הורדתי מהמשאית 6×48 ריקים״ או ״נתתי לאייל 4×48 מלאים · קיבלתי מאייל 4×12 ריקים״. שדה ריק = 0.</p>'+
+      '<div class="field fonly"'+(notR?'':' hidden')+'><span class="lbl">החלפתי משאית?</span><div class="chips"><button type="button" class="chip" data-swap="0" aria-pressed="'+(!draft.swap)+'">לא</button><button type="button" class="chip" data-swap="1" aria-pressed="'+draft.swap+'">כן</button></div></div>'+
+      '<div class="field fonly"'+(notR?'':' hidden')+'><span class="lbl">הטופס הוורוד</span>'+photoPick('pink','צלם טופס')+'</div>'+
       '<div class="field"><label for="facNote">הערה (לא חובה)</label><input class="inp" id="facNote" autocomplete="off"></div>'+
       '<p class="err" id="facErr" hidden></p>'+
       '<button class="btn btn-accent" type="button" id="saveFac">שמור</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
@@ -2742,6 +2888,7 @@ function openSheet(kind,preset){
     '<p class="hint">אם החיוג לא נפתח בלחיצה, המספר מופיע כאן להקלדה.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
   }
   if(kind==='dn'){ html=dnSheet(c); }
+  if(kind==='paycf'){ html=paycfSheet(c); if(c && c.wantPc){ delete c.wantPc; save(); } }
   if(kind==='fuel'){ html=fuelSheet(); }
   if(kind==='fault'){ html=faultSheet(); }
   if(kind==='sos'){ html=sosSheet(); }
@@ -2772,8 +2919,8 @@ function openSheet(kind,preset){
     kind='';
   }
   if(kind==='deliver'){
-    var md=mode(c), dpt=ptOf(c), codes=codesOf(c), payer=splitPayer(c);
-    draft={stop:c.id, q:{}, e:{}, loan:{1:0,2:0}, extra:[], price:{}, method:null, cheque:null, stand:null, paidBy:payer?payer.id:null, extraAmt:payer?0:splitRest(c), pf:[], disc:null, wantDn:false};
+    var md=mode(c), codes=codesOf(c), payer=splitPayer(c);
+    draft={stop:c.id, q:{}, e:{}, loan:{1:0,2:0}, extra:[], price:{}, method:null, cheque:null, stand:null, paidBy:payer?payer.id:null, extraAmt:payer?0:splitRest(c), pf:[], disc:null, wantDn:false, wantPc:false};
     codes.forEach(function(code){ draft.q[code]=ordered(c,code); });
     draft.e[1]=draft.q['1']; draft.e[2]=draft.q['2'];
     var payOpts = md==='verify' ? ['cash','cheque','office','later','prepaid','unpaid'] : ['cash','cheque','office','later','unpaid'];
@@ -2808,14 +2955,13 @@ function openSheet(kind,preset){
         '<span class="lbl">צילום הצ׳ק (לא חובה)</span>'+photoPick('cheque','צלם צ׳ק')+
         '<p class="hint">צילום עוזר לפקידה ומגן כשצ׳ק חוזר, אבל אפשר לאשר גם בלעדיו.</p></div>'
       : payer ? '' : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':c.officePaid?'💳 שולם במשרד'+(c.officePaid.a?' '+money(c.officePaid.a):'')+' ('+esc(c.officePaid.by||'')+') — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
-    '<div class="field"><span class="lbl">📍 מיקום חנייה'+(c.point?' — '+esc(c.point):'')+'</span><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-ghost btn-sm" id="gpsPark">'+(dpt?'עדכן למיקום הנוכחי':'שמור את המיקום הנוכחי')+'</button>'+
-      '<button type="button" class="btn btn-ghost btn-sm" id="mapPark">🗺 סמן על המפה</button></div>'+
-      '<p class="hint" id="gpsMsg">'+(dpt?'יש מיקום שמור'+(dpt.name?' ('+esc(dpt.name)+')':'')+' מהפעם הקודמת.':'עומד בחנייה הנכונה? שמור, ובפעם הבאה Waze והסידור ישתמשו בו.')+'</p><div id="geoBox"></div></div>'+
+    geoBlock(c)+
     '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(parkOf(c))+'</textarea></div>'+
     '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
     '<div class="field"><div class="chips"><button type="button" class="chip" data-nothome="1" aria-pressed="false">🏠 הלקוח לא היה בבית — סופק לעמדה</button></div>'+
       '<p class="hint">רק כשהלקוח כבר שילם ויש גישה למיכלים. לא שילם ואין מי שישלם — ״לא סופק״.</p></div>'+
-    '<div class="field"><div class="chips"><button type="button" class="chip" data-wantdn="1" aria-pressed="false">🧾 הלקוח מבקש תעודת משלוח</button></div>'+
+    '<div class="field"><div class="chips"><button type="button" class="chip" data-wantdn="1" aria-pressed="false">🧾 הלקוח מבקש תעודת משלוח</button>'+
+      (collects(c)?'<button type="button" class="chip" data-wantpc="1" aria-pressed="false">🧾 הלקוח מבקש קבלה / אישור תשלום</button>':'')+'</div>'+
       '<p class="hint">אחרי האישור: חתימה על המסך, ועותק ללקוח בוואטסאפ.</p></div>'+
     /* FEEDBACK #71: the customer asks for an invoice — it reaches the office as a note (with sound), and the report */
     '<div class="field"><label style="display:flex;gap:10px;align-items:center;font-weight:700"><input type="checkbox" id="invReq" style="width:24px;height:24px"> 🧾 הלקוח מבקש חשבונית</label>'+
@@ -2840,6 +2986,7 @@ function openSheet(kind,preset){
     html='<h2>לא סופק — '+esc(c.name)+'</h2><div class="field"><span class="lbl">למה?</span><div class="chips" role="group" aria-label="סיבה">'+
     REASONS.map(function(r){ return '<button type="button" class="chip" data-reason="'+r+'" aria-pressed="false">'+r+'</button>'; }).join('')+'</div></div>'+
     '<div class="field"><label for="failTxt">פירוט</label><textarea class="inp" id="failTxt" placeholder="חובה רק ב״אחר״"></textarea></div>'+
+    geoBlock(c)+   /* #118: the place can be marked also when nothing was delivered (e.g. "לא בבית") */
     '<p class="hint">ההזמנה חוזרת למשרד עם הסיבה. היא לא נמחקת.</p><p class="err" id="fErr" hidden></p>'+
     '<button class="btn btn-bad" type="button" id="confirmFail">סמן כלא סופק</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
   }
@@ -2890,8 +3037,11 @@ function openSheet(kind,preset){
   if(kind==='office' && officeIn && officeIn.blob) runOffice();
   if(kind==='pair') pairStart();
   if(kind==='dn' && c){ if(c.dn) layoutDn(); else initSig(); }
+  if(kind==='paycf') layoutDn();
 }
-function closeSheet(){ sheetKind=''; sheetPreset=''; sheetStop=''; metricsCur=null; clearResume(); document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null; }
+function closeSheet(){ var placed=draft && draft.geoSaved;   /* #118: a place marked in a sheet closed with "ביטול" — the card's Waze link is redrawn */
+  sheetKind=''; sheetPreset=''; sheetStop=''; metricsCur=null; clearResume(); document.getElementById('sheetRoot').innerHTML=''; draft=null; officeIn=null; if(typeof bot!=='undefined') bot.ackId=null;
+  if(placed) render(); }
 function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.textContent=msg; if(metricsCur) metricsCur.errs++; }
 /* UX stage 0, REVIEW.md §8: a sheet that was open when the phone rang, Waze took over or the browser was closed comes
    back as it was. What is kept (localStorage, at most 40 KB, 12 hours, same app version only): WHICH sheet, for WHICH stop,
@@ -2899,7 +3049,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.17', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.20', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -2993,9 +3143,12 @@ function saveCount(){
   var c={id:'C'+Date.now(), point:draft.point, pointText:draft.pointText, moment:draft.moment, v:draft.v,
     time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
   var mv=null, prevT=null;
-  if(c.point===ME()){ c.plate=plateOk(draft.plate); lsSet('gazgal-my-truck', c.plate);
+  if(c.point===ME()){ c.plate=plateOk(draft.plate); lsSet('gazgal-my-truck', c.plate); setPointPlate(ME(), c.plate);
     /* the morning exit count: the truck's last count (before today) becomes "יתרות מיום קודם", the difference is the facility */
-    if(c.moment==='יציאה'){
+    /* an exit count AFTER a truck swap is the new truck's, not the day's opening — yesterday's balance stays (Jarvis, #18) */
+    var swapped=(state.facility||[]).some(function(f){ return f.swap && f.newV; });
+    if(c.moment==='יציאה' && swapped) state.truck=c.plate;
+    else if(c.moment==='יציאה'){
       if(!state.truckPrev || state.truckPrev.plate!==c.plate){ var tp=trucks()[c.plate]; state.truckPrev = tp && tp.day!==dayOf() ? {date:tp.day, v:tp.v, moment:tp.moment, plate:c.plate} : null; }
       state.truck=c.plate; prevT=state.truckPrev; mv=prevT ? truckMove(prevT.v, c.v) : null; }
     else if(!state.truck) state.truck=c.plate;
@@ -3068,7 +3221,7 @@ function applySplit(){
   if(!s.orderNo && !s.hot) s.orderNo=s.id;
   s.point=n1;
   /* the customer's saved location becomes the first named point */
-  var P=ptsOf(s.cust); if(P.length && !P[0].name && !P.some(function(p){ return p.name===n1; })){ P[0].name=n1; touchPlace(s.cust); }
+  var P=ptsOf(s.cust); if(P.length && !P[0].name && !P.some(function(p){ return p.name===n1; })){ P[0].name=n1; P[0].t=Date.now(); state.memory[s.cust].gone=Object.assign(state.memory[s.cust].gone||{}, {'':P[0].t}); touchPlace(s.cust); }
   /* the new point enters the route right away, after the first one; nothing waits for the map */
   state.stops.splice(state.stops.indexOf(s)+1,0,n);
   var byMap=!!ptOf(n) && state.phase==='route';
@@ -3132,9 +3285,6 @@ function confirmDeliver(){
   if(draft.notHome) c.officeNote='הלקוח לא היה בבית — סופק לעמדה'+(c.officeNote?' · '+c.officeNote:'');
   if(draft.notHome && collects(c) && !draft.paidBy && ['prepaid','office','later'].indexOf(draft.method)<0){
     showErr('dErr','הלקוח לא בבית ולא שילם — לא מספקים. סמן ״לא סופק״ ← ״'+NOT_HOME_NOPAY+'״.'); return; }
-  if(draft.geo && !draft.geoMode){ showErr('dErr','המיקום נקלט — בחר אם להחליף את המיקום השמור או להוסיף נקודה.'); return; }
-  var gName=((document.getElementById('geoName')||{}).value||'').trim(), gOld=((document.getElementById('geoOld')||{}).value||'').trim();
-  if(draft.geo && draft.geoMode==='add' && ptsOf(c.cust).length && !gName && !c.point){ showErr('dErr','תן שם לנקודה החדשה (למשל ״משק״).'); return; }
   if(collects(c) && !draft.paidBy && !(pickOnly && !draft.method)){
     if(!draft.method){ showErr('dErr','בחר איך שולם.'); return; }
     if(draft.method==='cheque'){
@@ -3160,22 +3310,20 @@ function confirmDeliver(){
   else if(splitSibs(c).length && collects(c)) c.result.coversSplit=true;   /* the whole split order was paid here */
   var park=(document.getElementById('park').value||'').trim();
   state.memory[c.cust]=state.memory[c.cust]||{};
-  if(draft.geo){ var P=ptsOf(c.cust), ex=ptOf(c);
-    if(draft.geoMode==='replace' && ex){ ex.lat=draft.geo[0]; ex.lon=draft.geo[1]; ex.acc=draft.geoAcc; delete ex.auto; }
-    else { var nm=c.point || gName; if(gOld && P.length && !P[0].name) P[0].name=gOld;
-      var same=nm ? P.filter(function(x){ return x.name===nm; })[0] : null;
-      if(same){ same.lat=draft.geo[0]; same.lon=draft.geo[1]; same.acc=draft.geoAcc; delete same.auto; } else P.push({name:nm, lat:draft.geo[0], lon:draft.geo[1], acc:draft.geoAcc, src:draft.geoSrc||undefined});
-      if(nm && P.length>1) c.point=nm; } }
+  /* the place itself was saved when it was marked (savePlace, #118) */
   if(park){ var pp=c.point ? ptOf(c) : null; if(pp) pp.parking=park; else if(!c.point) state.memory[c.cust].parking=park; }
-  if(park || draft.geo) touchPlace(c.cust);
+  if(park) touchPlace(c.cust);
   if(draft.stand){ memPhotos[c.cust]=draft.stand; if(!/^hot-/.test(c.cust)){ state.memory[c.cust].ph=Date.now(); touchPlace(c.cust); standMark(c.cust, state.memory[c.cust].ph); standDirty(c.cust); } }
   if(draft.stand || draft.cheque) savePhotos();
-  if(!draft.geo && !ptOf(c) && !/^hot-/.test(c.cust) && c.pt && /רחוב|יישוב/.test(c.geoHow||'')) learnPlace(c);
-  var wantDn=draft.wantDn;
+  if(!draft.geoSaved && !ptOf(c) && !/^hot-/.test(c.cust) && c.pt && /רחוב|יישוב/.test(c.geoHow||'')) learnPlace(c);
+  var wantDn=draft.wantDn, askedPc=draft.wantPc, wantPc=askedPc && (pay.method==='cash' || pay.method==='cheque');
+  if(wantDn && wantPc) c.wantPc=true;   /* both asked: the delivery note first, and on it the payment confirmation is the next step (Jarvis, #17) */
   metricsDone(c.id);   /* the stop is written — the measurement is real */
   after('✓ '+c.name+(pay.method!=='none' ? ' · '+PAY[pay.method]+(pay.method==='prepaid'?'':' '+money(pay.amount)) : '')+(disc?' · עם הנחה':''));
+  /* FEEDBACK #123: this line stood after "return true" since 17/10 (stage 0) — the delivery note never opened */
+  if(wantDn) openSheet('dn', c.id); else if(wantPc) openSheet('paycf', c.id);
+  else if(askedPc) toast('אישור תשלום — רק למזומן או לצ׳ק שהתקבל בשטח');
   return true;
-  if(wantDn) openSheet('dn', c.id);
 }
 function safetyMsg(s){
   var r=s.result;
@@ -3330,16 +3478,55 @@ async function flushDns(){
   }catch(e){}
   dnBusy=false; }
 function dnMobile(c){ return contacts(c).filter(function(x){ return /^05/.test(x.num); })[0] || null; }
+/* FEEDBACK #121 (נדיר, 22/10): a document goes to the WhatsApp number the customer gives — also one not saved in the
+   phone's contacts. Two steps, nothing uploaded anywhere: (1) a chat opens with that number and a short message;
+   (2) the PDF is attached through the phone's share — that chat is now first in WhatsApp's list. */
+function waBlock(id, num){ return '<div class="field"><label class="lbl" for="'+id+'">📱 מספר הוואטסאפ של הלקוח</label><input class="inp num" id="'+id+'" inputmode="tel" autocomplete="off" value="'+esc(num||'')+'" placeholder="05X-XXXXXXX">'+
+  '<p class="err" id="'+id+'Err" hidden></p></div>'; }
+function waOpen(id, text){ var v=String((document.getElementById(id)||{}).value||'').replace(/\D/g,''), e=document.getElementById(id+'Err');
+  if(/^972/.test(v)) v='0'+v.slice(3);
+  if(!/^05\d{8}$/.test(v)){ if(e){ e.textContent='מספר נייד לא תקין (05X ועוד 7 ספרות).'; e.hidden=false; } return false; }
+  if(e) e.hidden=true; window.open('https://wa.me/'+intl(v)+'?text='+encodeURIComponent(text), '_blank'); return true; }
+function waSteps(prefix, id){ return '<button class="btn btn-accent" type="button" data-waopen="'+prefix+'" data-wa="'+esc(id)+'">1️⃣ פתח צ׳אט עם הלקוח בוואטסאפ</button>'+
+  '<button class="btn btn-accent" type="button" id="'+prefix+'Share" data-dn="'+esc(id)+'">2️⃣ 📎 צרף את ה־PDF</button>'+
+  '<p class="hint">שלב 1 פותח צ׳אט עם המספר (גם אם הלקוח לא שמור באנשי הקשר) — שולחים את ההודעה וחוזרים לכאן. שלב 2: בוחרים וואטסאפ, והצ׳אט עם הלקוח הוא הראשון ברשימה.</p>'; }
 function dnDoneHtml(c){
-  var mob=dnMobile(c);
+  var mob=dnMobile(c), r=c.result||{}, pm=(r.payment||{}).method;
   return '<h2>🧾 תעודת משלוח '+dnNo(c.dn.no)+' — '+esc(c.name)+'</h2>'+
     '<div class="docwrap" id="dnWrap"><div id="dnPage">'+dnPaper(c)+'</div></div>'+
-    '<button class="btn btn-accent" type="button" id="dnShare" data-dn="'+esc(c.id)+'">📤 שלח ללקוח (PDF)</button>'+
-    (mob?'<a class="btn btn-ghost btn-sm linkbtn" href="https://wa.me/'+intl(mob.num)+'?text='+encodeURIComponent(dnText(c))+'" target="_blank" rel="noopener">💬 פרטי התעודה בטקסט לוואטסאפ של הלקוח</a>':'')+
+    waBlock('dnWa', mob?mob.num:'')+waSteps('dn', c.id)+
     '<button class="btn btn-ghost btn-sm" type="button" id="dnSave" data-dn="'+esc(c.id)+'">⬇ שמור PDF בטלפון</button>'+
-    '<p class="hint">״שלח ללקוח״ פותח את השיתוף של הטלפון — בוחרים וואטסאפ ואת הלקוח. אם הלקוח לא שמור באנשי הקשר: ״פרטי התעודה בטקסט״ פותח איתו צ׳אט, ושם מצרפים את ה־PDF.</p>'+
+    (pm==='cash'||pm==='cheque' ? '<button class="btn '+(c.wantPc?'btn-ok':'btn-ghost btn-sm')+'" type="button" data-sheet="paycf" data-preset="'+esc(c.id)+'">🧾 '+(c.wantPc?'עכשיו: אישור התשלום שהלקוח ביקש':'אישור תשלום ללקוח')+'</button>' : '')+
     '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
 }
+/* FEEDBACK #122 (נדיר, 22/10): a customer who paid cash (or by cheque) and wants a receipt. A tax receipt comes only from
+   the accounting system (numbered — רווחית), so the driver gives a PAYMENT CONFIRMATION that says so; the receipt itself
+   comes from the office. */
+function paycfPaper(c){
+  var r=c.result||{}, p=r.payment||{}, at=new Date(r.at||Date.now()), row=function(a,b){ return '<tr><td style="text-align:start;font-weight:700;width:38%">'+a+'</td><td style="text-align:start">'+b+'</td></tr>'; };
+  return '<div class="paper dnp">'+
+    '<div class="hdr"><div><h1>'+esc(COMPANY)+'</h1><div class="f">ח.פ <b>'+COMPANY_ID+'</b></div></div><div style="text-align:end"><h1>אישור קבלת תשלום</h1></div></div>'+
+    '<table class="wide" style="font-size:14px"><tbody>'+
+      row('תאריך', esc(at.toLocaleDateString('he-IL'))+' '+esc(at.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})))+
+      row('התקבל מ', '<b>'+esc(c.name)+'</b>'+(custNo(c)?' · צרכן '+esc(custNo(c)):'')+'<br>'+esc(addr(c))+(c.city?', '+esc(c.city):''))+
+      row('סכום', '<b style="font-size:17px">'+money(p.amount||0)+'</b>')+
+      row('אמצעי תשלום', esc(p.method==='cheque' ? 'צ׳ק'+(p.no?' מס׳ '+p.no:'')+(p.due?' · לפירעון '+new Date(p.due).toLocaleDateString('he-IL'):'') : 'מזומן'))+
+      (p.forText||(p.for&&p.for.length) ? row('עבור', esc(p.forText || p.for.join(', '))) : '')+
+      row('אסמכתא', esc(c.dn&&c.dn.no ? 'תעודת משלוח '+dnNo(c.dn.no) : 'הזמנה '+(c.orderNo||c.id)))+
+      row('התקבל ע״י', esc(state.driver||'')+' (נהג)')+
+    '</tbody></table>'+
+    '<div style="margin-top:14px;font-weight:800;font-size:14px">אישור זה אינו מהווה קבלה לצורכי מס. קבלה רשמית תישלח מהמשרד.</div>'+
+    '<div class="foot"><span>'+esc(COMPANY)+'</span><span>הופק באפליקציית הנהג · '+esc(stamp())+'</span></div></div>'; }
+function paycfText(c){ var p=(c.result||{}).payment||{};
+  return 'שלום '+c.name+', כאן '+COMPANY+'.\nאישור: התקבל תשלום של '+money(p.amount||0)+' ('+(p.method==='cheque'?'צ׳ק':'מזומן')+') בתאריך '+new Date((c.result||{}).at||Date.now()).toLocaleDateString('he-IL')+'.\nמצורף אישור התשלום. קבלה רשמית תישלח מהמשרד.'; }
+function paycfSheet(c){ var r=c && c.result||{}, pm=(r.payment||{}).method;
+  if(!c || c.status!=='delivered' || (pm!=='cash' && pm!=='cheque')) return '<h2>🧾 אישור תשלום</h2><p style="margin:0">רק לתשלום במזומן או בצ׳ק שהתקבל בשטח.</p><button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>';
+  var mob=dnMobile(c);
+  return '<h2>🧾 אישור תשלום — '+esc(c.name)+'</h2>'+
+    '<div class="docwrap" id="dnWrap"><div id="dnPage">'+paycfPaper(c)+'</div></div>'+
+    waBlock('pcWa', mob?mob.num:'')+waSteps('pc', c.id)+
+    '<button class="btn btn-ghost btn-sm" type="button" id="pcSave" data-dn="'+esc(c.id)+'">⬇ שמור PDF בטלפון</button>'+
+    '<button class="btn btn-ghost btn-sm" type="button" data-close>סגור</button>'; }
 function layoutDn(){ var w=document.getElementById('dnWrap'), p=document.getElementById('dnPage'); if(!w||!p) return; p.style.zoom=Math.min(1,w.clientWidth/794); }
 function dnItemName(i){ return KG[i.code] ? 'גז — מיכל '+KG[i.code]+' ק״ג' : ITEM_NAME[i.code] || itemLabel(i); }
 /* the money on the note: list price per line, the journal's discount, the driver's discount (with its reason), total */
@@ -3400,9 +3587,10 @@ function dnPaper(c){
   '</div>';
 }
 function dnName(c){ return 'תעודת-משלוח-'+dnNo(c.dn.no)+'.pdf'; }
-async function dnPdf(c){
+function dnPdf(c){ return paperPdf(dnPaper(c)); }
+async function paperPdf(paper){
   await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
-  var pr=document.getElementById('printRoot'); pr.innerHTML=dnPaper(c); pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
+  var pr=document.getElementById('printRoot'); pr.innerHTML=paper; pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
   try{
     var cv=await window.html2canvas(pr.querySelector('.paper'),{scale:2, backgroundColor:'#ffffff', logging:false}), h=Math.round(210*cv.height/cv.width);
     var pdf=new window.jspdf.jsPDF({unit:'mm', format:[210,h], orientation:h>=210?'portrait':'landscape', compress:true});
@@ -3410,15 +3598,16 @@ async function dnPdf(c){
     return pdf.output('blob');
   } finally { pr.style.cssText=''; pr.innerHTML=''; }
 }
-async function dnShare(id, saveOnly){
-  var c=byId(id); if(!c || !c.dn) return;
-  var btn=document.getElementById(saveOnly?'dnSave':'dnShare'), lbl=btn && btn.textContent; if(btn){ btn.disabled=true; btn.textContent='מכין PDF…'; }
+async function dnShare(id, saveOnly, pc){
+  var c=byId(id); if(!c || (!pc && !c.dn)) return;
+  var btn=document.getElementById((pc?'pc':'dn')+(saveOnly?'Save':'Share')), lbl=btn && btn.textContent; if(btn){ btn.disabled=true; btn.textContent='מכין PDF…'; }
+  var name=pc ? 'אישור-תשלום-'+(c.orderNo||c.id)+'.pdf' : dnName(c);
   try{
-    var file=new File([await dnPdf(c)], dnName(c), {type:'application/pdf'});
+    var file=new File([await (pc ? paperPdf(paycfPaper(c)) : dnPdf(c))], name, {type:'application/pdf'});
     if(!saveOnly && navigator.canShare && navigator.canShare({files:[file]})){
-      try{ await navigator.share({files:[file], title:dnName(c)}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
+      try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
     } else {
-      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=dnName(c); document.body.appendChild(a); a.click(); a.remove();
+      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove();
       toast(saveOnly?'נשמר בטלפון — בתיקיית ההורדות':'ה־PDF ירד לטלפון. שלח אותו ללקוח מהקבצים.');
     }
   }catch(e){ toast('לא הצלחתי להכין PDF. נסה שוב.'); }
@@ -3551,35 +3740,45 @@ document.addEventListener('click',function(ev){
     idbGet('days', ds.openday).then(function(rec){ if(!rec){ toast('הדוח לא נמצא'); return; } rec.day=migrate(rec.day); docRec=rec; state.view='doc'; render(); window.scrollTo(0,0); })
       .catch(function(){ toast('לא הצלחתי לפתוח את הדוח'); });
     return; }
-  if(ds.fwhere){ draft.where=ds.fwhere; press('[data-fwhere]',t); document.querySelectorAll('.fonly').forEach(function(e){ e.hidden=(draft.where==='רמפה'); }); if(draft.where==='רמפה'){ draft.swap=false; draft.pink=null; } return; }
+  if(ds.fwhere){ draft.where=ds.fwhere; press('[data-fwhere]',t); document.querySelectorAll('.fonly').forEach(function(e){ e.hidden=(draft.where!=='מתקן'); });
+    if(draft.where!=='מתקן'){ draft.swap=false; draft.pink=null; document.getElementById('swBox').hidden=true; document.getElementById('mvBox').hidden=false; press('[data-swap]', document.querySelector('[data-swap="0"]')); }
+    document.getElementById('drvBox').hidden=(draft.where!=='נהג'); document.getElementById('mvRows').innerHTML=facRows(draft.where); return; }
+  if(ds.fto){ draft.to=ds.fto; press('[data-fto]',t); return; }
+  /* #125: the trucks to choose from in a swap; the new one comes filled with what it had at its last count */
+  if(ds.swold){ draft.oldPlate=ds.swold; press('[data-swold]',t); var sl=document.getElementById('sgl-o'); if(sl) sl.textContent='על המשאית שהחזרת ('+ds.swold+') — לפי האפליקציה, תקן אם צריך'; return; }
+  if(ds.swnew){ press('[data-swnew]',t); document.getElementById('swPlate').value=ds.swnew; var lt=trucks()[ds.swnew];
+    if(lt && lt.v) ['gm','km','gr','kr'].forEach(function(k){ draft.sw['n-'+k]=lt.v[k]||0; var inp=document.querySelector('[data-sw="n-'+k+'"]'); if(inp) inp.value=lt.v[k]||0; });
+    var sn=document.getElementById('sgl-n'); if(sn) sn.textContent='על המשאית החדשה — '+(lt?'לפי הספירה האחרונה שלה ('+(lt.day||'')+' '+(lt.moment||'')+'), תקן אם צריך':'מה יש עליה עכשיו'); return; }
   if(ds.swap){ draft.swap=ds.swap==='1'; press('[data-swap]',t); document.getElementById('swBox').hidden=!draft.swap; document.getElementById('mvBox').hidden=draft.swap; return; }
   if(t.id==='saveFac'){
     touchDay();
-    var mv={}, swap=draft.swap && draft.where!=='רמפה', oldV=null, newV=null, newPlate='', oldPlate=myPlate();
+    var mv={}, swap=draft.swap && draft.where==='מתקן', oldV=null, newV=null, newPlate='', oldPlate=draft.oldPlate||myPlate();
     if(swap){
       newPlate=plateOk((document.getElementById('swPlate')||{}).value);
-      if(newPlate.length<5){ showErr('facErr','כתוב את מספר הרישוי של המשאית החדשה.'); return; }
+      if(newPlate.length<5){ showErr('facErr','בחר או כתוב את מספר הרישוי של המשאית החדשה.'); return; }
+      if(newPlate===oldPlate){ showErr('facErr','המשאית החדשה זהה לזו שהחזרת.'); return; }
       oldV={}; newV={}; ['gm','km','gr','kr'].forEach(function(k){ oldV[k]=draft.sw['o-'+k]||0; newV[k]=draft.sw['n-'+k]||0; });
       if(!['gm','km','gr','kr'].some(function(k){ return newV[k]>0; })){ showErr('facErr','כתוב מה יש על המשאית החדשה.'); return; }
       /* the difference becomes "loaded / unloaded at the facility" — the day's reconciliation stays one */
       var d=function(k){ return newV[k]-oldV[k]; }, pos=function(x){ return x>0?x:0; }, neg=function(x){ return x<0?-x:0; };
       mv={lf:{1:pos(d('km')),2:pos(d('gm'))}, uf:{1:neg(d('km')),2:neg(d('gm'))}, le:{1:pos(d('kr')),2:pos(d('gr'))}, ue:{1:neg(d('kr')),2:neg(d('gr'))}};
     } else {
+      if(draft.where==='נהג' && !draft.to){ showErr('facErr','בחר עם איזה נהג.'); return; }
       ['lf','le','uf','ue'].forEach(function(k){ mv[k]={1:draft.fac[k+'-1']||0, 2:draft.fac[k+'-2']||0}; });
       if(!Object.keys(draft.fac).some(function(k){ return draft.fac[k]>0; })){ showErr('facErr','לא הוזן אף מספר.'); return; }
     }
-    var fid='F'+Date.now(), ftime=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-    state.facility.push({id:fid, where:draft.where, time:ftime, mv:mv, swap:swap,
-      truck:newPlate, fromTruck:swap?oldPlate:'', oldV:oldV, newV:newV, note:(document.getElementById('facNote').value||'').trim(), pink:!!draft.pink});
-    if(swap){
-      /* the old truck's history ends with what came back; the new truck is "mine" from now on */
-      putCountLog([{id:'A'+fid+'o', kind:'count', src:'app', day:dayOf(), time:ftime, at:Date.now(), by:state.driver||'', point:ME(), pointText:'', moment:'סוף יום', plate:oldPlate, v:oldV}]);
-      putCountLog([{id:'A'+fid+'n', kind:'count', src:'app', day:dayOf(), time:ftime, at:Date.now()+1, by:state.driver||'', point:ME(), pointText:'', moment:'יציאה', plate:newPlate, v:newV}]);
-      state.truck=newPlate; lsSet('gazgal-my-truck', newPlate);
-    }
-    if(draft.pink){ photos['pink-'+fid]=draft.pink; savePhotos(); }
-    after((draft.where==='רמפה'?'המחסן':'המתקן')+' נשמר ✓'); return; }
-  if(ds.delfac){ state.facility=state.facility.filter(function(f){ return f.id!==ds.delfac; }); delete photos['pink-'+ds.delfac]; savePhotos(); save(); render(); toast('נמחק'); return; }
+    var fr=recordFac({where:draft.where, to:draft.where==='נהג'?draft.to:'', mv:mv, swap:swap, oldPlate:oldPlate, newPlate:newPlate, oldV:oldV, newV:newV,
+      note:(document.getElementById('facNote').value||'').trim(), pink:!!draft.pink});
+    if(draft.pink){ photos['pink-'+fr.id]=draft.pink; savePhotos(); }
+    /* #125: right after any load / unload / hand-over / swap — a count of the truck, filled in from what the app knows */
+    render(); clearResume(); draft={facSaved:fr.id};
+    var tnow=truckNow();
+    document.querySelector('.sheet').innerHTML='<div class="grab"></div><h2>נשמר ✓</h2><div class="msg">'+esc(mvText(fr).join('\n')||'')+'</div>'+
+      (tnow ? '<div class="okbox" style="color:var(--ink);background:var(--surface)">🛻 לפי האפליקציה יש עכשיו על המשאית'+(myPlate()?' '+esc(myPlate()):'')+': <b>'+esc(cVals(tnow.v))+'</b></div>' : '')+
+      '<button class="btn btn-accent" type="button" data-sheet="count" data-preset="'+ME()+'|ספירה ביניים|now">🔢 ספירה עכשיו — ממולא מראש, רק לתקן</button>'+
+      '<button class="btn btn-ghost btn-sm" type="button" data-close>אחר כך</button>';
+    toast('נשמר ✓'); return; }
+  if(ds.delfac){ delFac(ds.delfac); render(); toast('נמחק'); return; }
   if(t.id==='offRead'){ var ot=(document.getElementById('offText').value||'').trim(), ob=draft && draft.offImg;
     if(!ob && !ot){ toast('בחר צילום או הדבק את הטקסט'); return; }
     fetch(ob||'data:,').then(function(r){ return ob ? r.blob() : null; }).then(function(b){ officeIn={blob:b, text:ot}; t.hidden=true; runOffice(); }); return; }
@@ -3657,6 +3856,7 @@ document.addEventListener('click',function(ev){
   if(ds.nothome){ draft.notHome=!draft.notHome; t.setAttribute('aria-pressed', draft.notHome?'true':'false'); return; }
   if(ds.pfor){ var pi=draft.pf.indexOf(ds.pfor); if(pi>=0) draft.pf.splice(pi,1); else draft.pf.push(ds.pfor); t.setAttribute('aria-pressed', pi<0?'true':'false'); return; }
   if(ds.wantdn){ draft.wantDn=!draft.wantDn; t.setAttribute('aria-pressed', draft.wantDn?'true':'false'); return; }
+  if(ds.wantpc){ draft.wantPc=!draft.wantPc; t.setAttribute('aria-pressed', draft.wantPc?'true':'false'); return; }
   if(ds.dnmode){ draft.dnNoSig=ds.dnmode==='nohome'; press('[data-dnmode]',t); document.getElementById('sigBox').hidden=draft.dnNoSig; if(!draft.dnNoSig && !(sig && sig.drawn)) initSig(); return; }
   if(t.id==='sigClear'){ if(sig){ sig.g.clearRect(0,0,sig.cv.width,sig.cv.height); sig.drawn=false; } return; }
   if(t.id==='issueDn'){ issueDn(); return; }
@@ -3665,10 +3865,27 @@ document.addEventListener('click',function(ev){
   if(ds.fdrive){ draft.drive=ds.fdrive; press('[data-fdrive]',t); return; }
   if(t.id==='confirmFuel'){ confirmFuel(); return; }
   if(t.id==='pasteRead'){ pasteRead(); return; }
-  if(t.id==='pasteSave'){ var pp=draft && draft.parsed; if(!pp) return; var nn=putCountLog(pp.counts.concat(pp.notes)); after(nn ? '✓ נשמרו '+pp.counts.length+' ספירות' : 'הספירות האלה כבר נשמרו קודם'); return; }
+  if(t.id==='ppSave'){ var ppm=pointPlates(); [].forEach.call(document.querySelectorAll('[data-pp]'), function(i){ var pv=plateOk(i.value); if(pv.length>=5) ppm[i.dataset.pp]=pv; else delete ppm[i.dataset.pp]; }); lsSet('gazgal-point-plates', ppm); toast('✓ נשמר'); return; }
+  if(t.id==='pasteSave'){ var pp=draft && draft.parsed; if(!pp) return; var nn=putCountLog(pp.counts.concat(pp.notes));
+    /* #125: each count also goes into its truck's own history (an older one never replaces a newer state) */
+    pp.counts.forEach(function(c){ if(!c.plate || (c.same && !Object.keys(c.v).length)) return; if(!c.plateFrom) setPointPlate(c.point, c.plate); truckSave(c.plate, {at:c.at, day:c.day, v:c.v, moment:c.moment, time:c.time, by:c.by}); }); after(nn ? '✓ נשמרו '+pp.counts.length+' ספירות' : 'הספירות האלה כבר נשמרו קודם'); return; }
   if(t.id==='confirmFault'){ confirmFault(); return; }
   if(t.id==='dnShare' || t.id==='dnSave'){ dnShare(ds.dn, t.id==='dnSave'); return; }
-  if(ds.geomode){ draft.geoMode=ds.geomode; press('[data-geomode]',t); document.getElementById('geoAdd').hidden=(ds.geomode!=='add'); return; }
+  if(t.id==='pcShare' || t.id==='pcSave'){ dnShare(ds.dn, t.id==='pcSave', true); return; }
+  if(ds.waopen){ var wc=byId(ds.wa); if(wc) waOpen(ds.waopen+'Wa', ds.waopen==='pc' ? paycfText(wc) : dnText(wc)); return; }
+  /* #118: which point a mark goes to — saved at once */
+  if(ds.geoto!==undefined || ds.geonew || ds.geoasnew || t.id==='geoAddSave'){
+    var gq=draft && byId(draft.stop), pend=draft && draft.geoPending; if(!gq || !pend) return;
+    if(ds.geoto!==undefined){ var tp=ptsOf(gq.cust)[+ds.geoto]; if(!tp) return; press('[data-geoto],[data-geonew]',t);
+      var sp=savePlace(gq, pend.ll, pend.acc, 'add', tp.name||'', '', pend.src); document.getElementById('geoAdd').hidden=true; geoSaved(gq, sp, pend.how); return; }
+    if(ds.geonew){ press('[data-geoto],[data-geonew]',t); document.getElementById('geoAdd').hidden=false; return; }
+    if(ds.geoasnew){   /* undo the replace: the old point is back as it was (newer, so it wins on the other phones too), then name the new one */
+      var cur0=ptOf(gq); if(cur0 && pend.old){ ['lat','lon','acc','auto','src'].forEach(function(k){ if(pend.old[k]===undefined) delete cur0[k]; else cur0[k]=pend.old[k]; }); cur0.t=Date.now(); touchPlace(gq.cust); save(); }
+      document.getElementById('geoBox').innerHTML=geoChoice(gq); document.getElementById('geoAdd').hidden=false;
+      var gm2=document.getElementById('gpsMsg'); if(gm2){ gm2.textContent='המיקום הקודם הוחזר. תן שם לנקודה החדשה:'; gm2.style.color=''; } draft.geoSaved=false; return; }
+    var gn=((document.getElementById('geoName')||{}).value||'').trim(), go=((document.getElementById('geoOld')||{}).value||'').trim(), ge=document.getElementById('geoErr');
+    if(!gn){ if(ge){ ge.textContent='תן שם לנקודה החדשה (למשל ״משק״).'; ge.hidden=false; } return; }
+    var np=savePlace(gq, pend.ll, pend.acc, 'add', gn, go, pend.src); document.getElementById('geoBox').innerHTML=''; geoSaved(gq, np, pend.how); return; }
   if(ds.splitgo){ applySplit(); return; }
   if(ds.unsplit){ unsplit(ds.unsplit); return; }
   if(ds.spname){ var sn=document.getElementById(ds.spname.split('|')[0]); if(sn) sn.value=ds.spname.split('|')[1]; return; }
