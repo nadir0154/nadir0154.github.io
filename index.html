@@ -3049,7 +3049,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.20', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.21', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
