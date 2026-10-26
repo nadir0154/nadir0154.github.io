@@ -1024,8 +1024,13 @@ function sendLiveSoon(){ try{ if(typeof scheduleLive==='function') scheduleLive(
    Now a mark is saved the moment it is made and becomes the customer's default (m.def); every point carries the time it
    was set (t); phones and the server merge one customer's record point by point — the newer point wins, none is lost. */
 function ptsOf(cust){ var m=state.memory[cust]; if(!m) return []; if(!m.points) m.points = m.lat ? [{name:'', lat:m.lat, lon:m.lon}] : []; return m.points; }
-function defPt(cust){ var P=ptsOf(cust), d=(state.memory[cust]||{}).def; return (d && P.filter(function(p){ return p.name===(d.name||''); })[0]) || P[0] || null; }
-function ptOf(s){ var P=ptsOf(s.cust); return s.point ? P.filter(function(p){ return p.name===s.point; })[0] || null : defPt(s.cust); }
+/* FEEDBACK #136 (נדיר 26/10): "the saved place is always off — 7 minutes from the route, or the middle of a field". On the
+   server: 11 points saved 1–6/10, before #89 refused it, lie exactly on a 1/111° grid — the browser had only "approximate
+   location" (±1–2 km). Such a point is not used: the customer counts as having no saved point, and the next mark replaces it. */
+function coarse(p){ return !!p && p.acc==null && !p.src && !p.auto && isFinite(p.lat) && Math.abs(p.lat*111-Math.round(p.lat*111))<1e-6; }
+function goodPts(cust){ return ptsOf(cust).filter(function(p){ return !coarse(p); }); }
+function defPt(cust){ var P=goodPts(cust), d=(state.memory[cust]||{}).def; return (d && P.filter(function(p){ return p.name===(d.name||''); })[0]) || P[0] || null; }
+function ptOf(s){ var P=goodPts(s.cust); return s.point ? P.filter(function(p){ return p.name===s.point; })[0] || null : defPt(s.cust); }
 /* two copies of one customer's record → one: the other fields from the newer copy, the points one by one by their own time
    (the same function is in server/src/index.js — keep the two alike) */
 function mergePlace(a, b){ a=a||{}; b=b||{};
@@ -1097,6 +1102,22 @@ async function syncStands(){
       standMark(c, state.memory[c].ph); got++; }catch(e){} }
   if(got){ savePhotos(); if(!document.querySelector('.scrim')) render(); }
 }
+/* FEEDBACK #136: a saved point that is simply wrong is caught where the truth is — at "✓ סופק" the driver stands at the
+   customer. A good fix (±30 m, standing) more than 250 m from the saved point is offered on the route screen (not a popup
+   that could come up while driving): "update to there" or "leave it". */
+/* standing near ANY of the customer's points (the farm, not the house) is fine; far from all of them → the point used for
+   this stop (s.point, or the default) is offered for update — that one, never another point of the customer (Jarvis, #31) */
+async function checkPlace(c){ if(!ptOf(c)) return;
+  try{ var pos=await preciseFix(20, 15000), ll=[pos.coords.latitude, pos.coords.longitude], acc=Math.round(pos.coords.accuracy||999), P=goodPts(c.cust);
+    if(!P.length || !ptOf(c) || acc>30 || (pos.coords.speed||0)>2) return;
+    var d=Math.min.apply(null, P.map(function(p){ return dist([p.lat, p.lon], ll); })); if(d<0.25) return;
+    state.farFix=farLive().filter(function(x){ return x.cust!==c.cust; }).concat([{cust:c.cust, id:c.id, name:c.name, point:c.point||'', ll:ll, acc:acc, m:Math.round(d*1000), at:Date.now()}]); save();
+    if(!document.querySelector('.scrim')) render(); }catch(e){} }
+/* an offer lives 24 hours (and a new day starts without them — fresh()) */
+function farLive(){ return (state.farFix||[]).filter(function(x){ return Date.now()-(x.at||0)<864e5; }); }
+function farNote(){ return farLive().map(function(x){ var far=x.m>=1000 ? (x.m/1000).toFixed(1)+' ק״מ' : x.m+' מ׳';
+    return '<div class="note" style="border:2px solid var(--warn,#c77700);display:grid;gap:6px;margin:8px 12px">📍 <span><b>'+esc(x.name)+'</b>: המיקום השמור רחוק <b>'+far+'</b> מהמקום שבו סימנת ״סופק״ — לשם Waze והסידור לוקחים. אם עמדת ליד הלקוח, עדכן.</span>'+
+      '<div style="display:flex;gap:8px"><button type="button" class="btn btn-accent btn-sm" data-farok="'+esc(x.cust)+'">📍 עדכן למקום שבו סימנתי</button><button type="button" class="btn btn-ghost btn-sm" data-farno="'+esc(x.cust)+'">השאר</button></div></div>'; }).join(''); }
 /* FEEDBACK #60: the map does not know every street (e.g. סמברוסקי, באר שבע). When a stop placed only by its street or
    town is marked "✓ סופק", the phone's GPS there becomes the customer's point — for every driver, via the server — if the
    fix is accurate and near the estimate (the driver may mark it later, somewhere else). */
@@ -2727,7 +2748,8 @@ function render(){
   refreshWait();
   var v=state.view;
   var body = v==='stock' ? viewStock() : v==='history' ? viewHistory() : v==='doc' ? viewDoc() : v==='cash' ? viewCash() : state.phase==='morning' ? viewMorning() : v==='end' ? viewEnd() : viewRoute();
-  document.getElementById('app').innerHTML = topbar()+body+navbar();
+  var onRoute=!/^(stock|history|doc|cash|end)$/.test(v||'') && state.phase!=='morning';
+  document.getElementById('app').innerHTML = topbar()+(onRoute?farNote():'')+body+navbar();
   if(v==='doc') layoutDoc();
   if(v==='history') fillHistory();
   if(v==='cash') fillPayHist();
@@ -3049,7 +3071,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.21', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.22', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -3316,6 +3338,7 @@ function confirmDeliver(){
   if(draft.stand){ memPhotos[c.cust]=draft.stand; if(!/^hot-/.test(c.cust)){ state.memory[c.cust].ph=Date.now(); touchPlace(c.cust); standMark(c.cust, state.memory[c.cust].ph); standDirty(c.cust); } }
   if(draft.stand || draft.cheque) savePhotos();
   if(!draft.geoSaved && !ptOf(c) && !/^hot-/.test(c.cust) && c.pt && /רחוב|יישוב/.test(c.geoHow||'')) learnPlace(c);
+  else if(!draft.geoSaved && ptOf(c) && !/^hot-/.test(c.cust)) checkPlace(c);
   var wantDn=draft.wantDn, askedPc=draft.wantPc, wantPc=askedPc && (pay.method==='cash' || pay.method==='cheque');
   if(wantDn && wantPc) c.wantPc=true;   /* both asked: the delivery note first, and on it the payment confirmation is the next step (Jarvis, #17) */
   metricsDone(c.id);   /* the stop is written — the measurement is real */
@@ -3730,6 +3753,12 @@ document.addEventListener('click',function(ev){
   if(t.hasAttribute('data-scrim')){ if(ev.target===t) closeSheet(); return; }
   if(t.hasAttribute('data-close')){ closeSheet(); return; }
   var ds=t.dataset;
+  if(ds.farok || ds.farno){ var fx=farLive().filter(function(x){ return x.cust===(ds.farok||ds.farno); })[0];
+    state.farFix=farLive().filter(function(x){ return x!==fx; });
+    /* the point of that stop — by the cust and the point's name kept with the offer, not whatever stop is found now */
+    if(ds.farok && fx){ var fs=byId(fx.id); if(!fs || fs.cust!==fx.cust || (fs.point||'')!==fx.point) fs={id:fx.id, cust:fx.cust, name:fx.name, point:fx.point};
+      savePlace(fs, fx.ll, fx.acc, 'replace', '', '', ''); toast('📍 עודכן — מהפעם הבאה Waze והסידור ייקחו לשם, אצל כל הנהגים'); } else save();
+    render(); return; }
   /* FEEDBACK #41: tapping Waze / "בדרך אליך" = leaving for that stop. The link still opens as usual. */
   if(ds.go){ var gs=byId(ds.go); if(gs && gs.status==='pending'){ gs.leftAt=Date.now(); save(); sendLive(); } }
   if(ds.view){
