@@ -402,6 +402,10 @@ function mode(s){
   return 'verify';
 }
 function collects(s){ var m=mode(s); return m==='collect' || m==='verify'; }
+/* the whole order came from Bashan without a price (an order for a central system — billed by the meter): nothing to collect in the field */
+function unpriced(s){ return s.kind!=='task' && (s.items||[]).length>0 && s.items.every(function(i){ return !(+i.price); }) && !s.discGross; }
+/* nothing to collect here: an order without a price, and no other point of a split order adds to the bill */
+function noCharge(s){ return collects(s) && unpriced(s) && !splitRest(s); }
 function contacts(s){
   var out=[], note=s.note||'', seen={};
   function add(label,num){ var k=num.replace(/\D/g,''); if(!k || seen[k]) return; seen[k]=1; out.push({label:label,num:num}); }
@@ -882,8 +886,8 @@ function parseJournal(pages){
       if(df.city && !s.city) s.city=df.city;
       if(df.p1 && !s.phones[0]) s.phones[0]=df.p1;
       if(df.p2 && !s.phones[1]) s.phones[1]=df.p2;
-      if(df.code && df.qty && df.price){
-        s.items.push({code:df.code.trim(), desc:(df.desc||'').trim(), qty:parseFloat(df.qty)||0, price:parseFloat(String(df.price).replace(/,/g,''))||0});
+      if(df.code && df.qty && (df.price || (ITEM_NAME[df.code.trim()] && /^\d+(\.\d+)?$/.test(String(df.qty).trim())))){   /* a known item without a price (central order) — kept, at 0 */
+        s.items.push({code:df.code.trim(), desc:(df.desc||'').trim(), qty:parseFloat(df.qty)||0, price:parseFloat(String(df.price||'').replace(/,/g,''))||0});
       }
     });
   });
@@ -1563,7 +1567,10 @@ function matchStop(f){
   state.stops.forEach(function(s){ var sn=normName(s.name); if(!sn.length) return;
     var hit=fn.filter(function(w){ return sn.some(function(x){ return lev(w,x)<=1; }); }).length, sc=hit/Math.max(fn.length,sn.length);
     if(sc>bs){ bs=sc; best=s; } });
-  return bs>=0.6 ? {s:best, how:'שם'} : null;
+  if(bs<0.6) return null;
+  /* the same name, another full card number — likely another card of the same business (a branch, another address) */
+  if(f.card && f.card.length>=4 && best.cust && /^\d+$/.test(best.cust) && best.cust!==f.card && best.cust.indexOf(f.card)!==0) return {s:best, how:'שם', other:true};
+  return {s:best, how:'שם'};
 }
 var officeIn=null;   /* {blob, text} waiting to be read */
 async function runOffice(){
@@ -1589,7 +1596,12 @@ function officeResultHtml(){
     (f.err?'<div class="note">לא הצלחתי לקרוא את הצילום. אפשר להשלים ידנית.</div>':'')+
     (f.screen==='BB-6632'?'<div class="hint">זוהה מסך "קליטת הזמנה" (BB-6632).</div>':'')+
     (f.card||f.name ? '<div class="mem"><b>מהצילום</b><span>'+esc([f.card?'כרטיס '+f.card:'', f.name, [f.street,f.house].filter(Boolean).join(' '), f.city].filter(Boolean).join(' · '))+'</span>'+(f.phones.length?'<span class="num">'+esc(f.phones.join(' · '))+'</span>':'')+'</div>' : '');
-  if(s){
+  if(s && mt.other){
+    out+='<section class="card" style="gap:8px"><span class="eyebrow">בסבב יש לקוח בשם דומה — אבל בכרטיס אחר</span><div class="t" style="font-weight:800;font-size:18px">'+esc(s.name)+'</div>'+
+      '<div class="muted">'+esc(addr(s))+', '+esc(s.city)+' · צרכן '+esc(s.cust)+' — בצילום: כרטיס <b>'+esc(f.card)+'</b></div></section>'+
+      '<button class="btn btn-accent" type="button" data-offnew="1">➕ לקוח אחר (כרטיס '+esc(f.card)+') — הוסף לסבב</button>'+
+      '<button class="btn btn-ghost btn-sm" type="button" data-offsame="1">זה אותו לקוח ('+esc(s.cust)+')</button>';
+  } else if(s){
     out+='<section class="card" style="gap:8px"><span class="eyebrow">הלקוח כבר בסבב (לפי '+esc(mt.how)+')</span><div class="t" style="font-weight:800;font-size:18px">'+esc(s.name)+'</div>'+
       '<div class="muted">'+esc(addr(s))+', '+esc(s.city)+(custNo(s)?' · צרכן '+esc(custNo(s)):'')+' · '+(s.status==='pending'?'עוד לא סופק':s.status==='delivered'?'כבר סופק':'סומן לא סופק')+'</div></section>';
     if(msg.intent==='cancel' && s.status==='pending')
@@ -2000,6 +2012,7 @@ function badge(s){
 }
 function badgePay(s){
   var md=mode(s), amt=money(totalOf(s,false));
+  if(noCharge(s)) return '<div class="collect c-credit"><span>📋 בלי מחיר מבש״ן<small>המשרד מחייב</small></span><span>ללא חיוב</span></div>';
   if(md==='collect') return '<div class="collect c-collect"><span>לגבות</span><span class="big num">'+amt+'</span></div>';
   if(md==='verify') return '<div class="collect c-verify"><span>לגבות?<small>'+(s.paidFlag?'':/שולם/.test(s.note||'')?'בהערה כתוב ״שולם״ — לוודא עם הלקוח':'לא מסומן כשולם — לוודא')+'</small></span><span class="big num">'+amt+'</span></div>';
   if(md==='paid') return '<div class="collect c-paid"><span>'+(s.officePaid?'💳 שולם במשרד'+(s.officePaid.a?' '+money(s.officePaid.a):'')+'<small>'+esc([s.officePaid.how,s.officePaid.by].filter(Boolean).join(' · '))+'</small>':'שולם מראש')+'</span><span>לא גובים</span></div>';
@@ -2009,7 +2022,7 @@ function badgePay(s){
 function listTag(s){
   var md=mode(s), a=money(totalOf(s,false));
   if(md==='task') return '<span class="tag t-info">🛠 מטלה</span>'+(isAm(s)?' <span class="tag t-warn">🌅 בבוקר</span>':'');
-  return (isAm(s)?'<span class="tag t-warn">🌅 בבוקר</span> ':'')+(md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
+  return (isAm(s)?'<span class="tag t-warn">🌅 בבוקר</span> ':'')+(noCharge(s)?'<span class="tag t-info">ללא חיוב</span>':md==='collect'?'<span class="tag t-acc num">לגבות '+a+'</span>':md==='verify'?'<span class="tag t-warn num">לוודא '+a+'</span>':md==='paid'?'<span class="tag t-ok">שולם</span>':'<span class="tag t-info">'+(md==='standing'?'הו״ק':'אשראי')+'</span>')+
     (s.hot?' <span class="tag t-acc">חמה</span>':'')+(s.cityGuess?' <span class="tag t-warn">יישוב משוער</span>':'')+
     (s.geoHow==='רחוב'?' <span class="tag t-info">📍 לפי הרחוב</span>':s.geoHow==='יישוב'?' <span class="tag t-warn">מיקום משוער</span>':'')+(s.geoHow==='לא נמצא'?' <span class="tag t-bad">לא נמצא במפה</span>':'');
 }
@@ -2953,7 +2966,7 @@ function openSheet(kind,preset){
       '<p class="hint">מיכלים ריקים שהלקוח קיבל בהשאלה ומחזיר עכשיו, מעבר לריקים של ההזמנה. נכנס להערות בדוח, כדי שהמשרד לא יחייב אותו על פיקדון.</p></details>'+
       '<p class="hint">לא סופק גז, רק אספת ריקים? הורד את הגז ל־0 וסמן את הריקים — אין צורך בתשלום.</p></div>'+
     (collects(c) && payer ? '<div class="okbox">שולם בנקודה '+esc(payer.point||'הראשונה')+' — על כל ההזמנה. כאן רק מורידים מיכלים.</div>' : '')+
-    (collects(c) && !payer
+    (collects(c) && !payer && !noCharge(c)
       ? '<div class="sum"><span>לגבות</span><span class="big num" id="dAmt">'+money(dAmount(c))+'</span></div>'+
         (draft.extraAmt?'<div class="note">הזמנה מפוצלת: הסכום כולל גם את '+esc(splitSibs(c).filter(function(x){ return x.status==='pending'; }).map(function(x){ return x.point||'הנקודה השנייה'; }).join(', '))+' ('+money(draft.extraAmt)+'). גובים פעם אחת, כאן.</div>':'')+
         (md==='verify'?'<div class="note">'+(/שולם/.test(c.note||'')?'בהערה כתוב ״שולם״. אם הלקוח כבר שילם — בחר ״שולם מראש״.':'ההזמנה לא מסומנת כשולמה. לוודא עם הלקוח.')+'</div>':'')+
@@ -2976,7 +2989,7 @@ function openSheet(kind,preset){
         '<div class="field"><label for="chqDue" class="lbl">לפירעון (לא חובה)</label><input class="inp num" id="chqDue" type="date"></div></div>'+
         '<span class="lbl">צילום הצ׳ק (לא חובה)</span>'+photoPick('cheque','צלם צ׳ק')+
         '<p class="hint">צילום עוזר לפקידה ומגן כשצ׳ק חוזר, אבל אפשר לאשר גם בלעדיו.</p></div>'
-      : payer ? '' : '<div class="okbox">'+(md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':c.officePaid?'💳 שולם במשרד'+(c.officePaid.a?' '+money(c.officePaid.a):'')+' ('+esc(c.officePaid.by||'')+') — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
+      : payer ? '' : '<div class="okbox">'+(noCharge(c)?'📋 ההזמנה הגיעה מבש״ן בלי מחיר (למשל מרכזייה) — לא גובים בשטח. המשרד מחייב.':md==='credit'?'לקוח אשראי — לא גובים בשטח.':md==='standing'?'הוראת קבע — לא גובים בשטח.':c.officePaid?'💳 שולם במשרד'+(c.officePaid.a?' '+money(c.officePaid.a):'')+' ('+esc(c.officePaid.by||'')+') — לא גובים בשטח.':'שולם מראש — לא גובים בשטח.')+'</div>')+
     geoBlock(c)+
     '<div class="field"><label for="park">הערת חנייה (לא חובה)</label><textarea class="inp" id="park" placeholder="למשל: לחנות ברחוב המקביל, הבלונים מאחורי הבית">'+esc(parkOf(c))+'</textarea></div>'+
     '<div class="field"><span class="lbl">תמונת עמדת הבלונים (לא חובה)</span>'+photoPick('stand','צלם עמדה')+'</div>'+
@@ -3071,7 +3084,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.22', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.23', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -3284,8 +3297,10 @@ function confirmDeliver(){
   /* FEEDBACK #59: no gas, only empties collected (e.g. a loaned cylinder the customer owed) — saved, no payment needed */
   var back=(draft.e[1]||0)+(draft.e[2]||0)+(draft.loan[1]||0)+(draft.loan[2]||0), pickOnly=!total && back>0;
   if(!total && !back){ showErr('dErr','לא סומנה כמות. רק אספת ריקים? סמן אותם ב״ריקים שנאספו״ או ב״החזיר מיכלים מושאלים״. לא היה כלום — ״לא סופק״.'); return; }
-  var noPrice=dItems(c).filter(function(i){ return i.actual && !i.price; })[0];
+  var free=noCharge(c);   /* an order without a price: its own items at 0 are right, not missing */
+  var noPrice=dItems(c).filter(function(i){ return i.actual && !i.price && !(free && c.items.some(function(x){ return x.code===i.code; })); })[0];
   if(noPrice){ showErr('dErr','חסר מחיר ל'+ITEM_NAME[noPrice.code]+'.'); return; }
+  if(free && dAmount(c)>0){ showErr('dErr','ההזמנה בלי מחיר — אין כאן גבייה. מה שנוסף בשטח: לכתוב בהערה למשרד ולהוריד ל־0.'); return; }
   /* office feedback מ4: a discount needs a lower price and its reason */
   var gv=function(id){ return ((document.getElementById(id)||{}).value||'').trim(); }, dRaw=gv('discPrice'), dWhy=gv('discWhy'), disc=null;
   draft.disc=null;
@@ -3305,9 +3320,10 @@ function confirmDeliver(){
   var ivq=document.getElementById('invReq');
   if(ivq && ivq.checked){ var ivt=(document.getElementById('invTo').value||'').trim(); c.invReq={to:ivt}; c.officeNote='🧾 מבקש חשבונית'+(ivt?' → '+ivt:'')+(c.officeNote?' · '+c.officeNote:''); }
   if(draft.notHome) c.officeNote='הלקוח לא היה בבית — סופק לעמדה'+(c.officeNote?' · '+c.officeNote:'');
-  if(draft.notHome && collects(c) && !draft.paidBy && ['prepaid','office','later'].indexOf(draft.method)<0){
+  if(free) c.officeNote='📋 הזמנה בלי מחיר מבש״ן — לא נגבה בשטח'+(c.officeNote?' · '+c.officeNote:'');
+  if(draft.notHome && collects(c) && !free && !draft.paidBy && ['prepaid','office','later'].indexOf(draft.method)<0){
     showErr('dErr','הלקוח לא בבית ולא שילם — לא מספקים. סמן ״לא סופק״ ← ״'+NOT_HOME_NOPAY+'״.'); return; }
-  if(collects(c) && !draft.paidBy && !(pickOnly && !draft.method)){
+  if(collects(c) && !free && !draft.paidBy && !(pickOnly && !draft.method)){
     if(!draft.method){ showErr('dErr','בחר איך שולם.'); return; }
     if(draft.method==='cheque'){
       var camt=parseFloat(String(document.getElementById('chqAmt').value||'').replace(',','.'))||0;
@@ -3820,6 +3836,7 @@ document.addEventListener('click',function(ev){
     draft.match=matchStop(draft.f); document.getElementById('offBox').innerHTML=officeResultHtml(); toast('עודכן לפי הטקסט'); return; }
   if(ds.offcancel){ var oc=byId(ds.offcancel); if(oc){ oc.items.forEach(function(i){ i.actual=0; }); oc.status='failed';
       oc.result={reason:CANCEL, text:(draft && draft.msg && draft.msg.text)||'', empties:{1:0,2:0}, cancelled:true}; officeIn=null; botAck('cancelled', oc.name); after('✕ '+oc.name+' — בוטל ע״י המשרד'); } return; }
+  if(ds.offsame){ if(draft && draft.match){ draft.match.other=false; var ob=document.getElementById('offBox'); if(ob) ob.innerHTML=officeResultHtml(); } return; }
   if(ds.offnew){ var of=draft.f, om=draft.msg; officeIn=null; openSheet('hot'); draft.fromOffice=true; fillHot(of,om); return; }
   if(ds.jrload){ loadOfficeJournal(ds.jrload); return; }
   if(t.id==='restoreDay'){ restoreDay(); return; }
