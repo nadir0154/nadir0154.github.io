@@ -95,6 +95,7 @@ h1,h2,h3{margin:0;text-wrap:balance}
 .pill .kg{font-size:13px;font-weight:700;color:var(--muted)}
 .note{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
 .okbox{background:var(--ok-bg);color:var(--ok);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px}
+.debtbox{background:var(--bad-bg);color:var(--bad);border:2px solid var(--bad);border-radius:10px;padding:9px 12px;font-weight:700;font-size:15px;margin:6px 0}
 .mem{background:var(--surface-2);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;font-size:14px;display:grid;gap:6px}
 .mem img{border-radius:8px;max-height:140px;object-fit:cover}
 .acts{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px}
@@ -1780,6 +1781,19 @@ async function pollEdits(){
 /* what the driver must not miss on the way to a customer: the office's OK for an order he typed, and its changes */
 async function pollOffice(){ if(!BOT_API || bot.status!=='active' || pollOffice.busy) return; pollOffice.busy=true;   /* never twice at once — an edit would apply twice */
   try{ await pollRequests(); flushRequests(); await pollEdits(); } finally { pollOffice.busy=false; } }
+/* ⛔ a customer of the day who owes more than 60 days past his terms (💰 חובות, #64 — Bashan's aging report in the office):
+   said on his card, and kept on the stop so it shows without reception too. The server answers only about the stops of this
+   driver's day as his phone backed it up — asked again every 3 minutes until the backup is there */
+async function pollDebts(){ if(state.source!=='pdf') return;
+  var cs=pending().map(custNo).filter(function(c,i,a){ return c && a.indexOf(c)===i; }).slice(0,80);
+  if(!cs.length || Date.now()-(pollDebts.at||0)<180e3) return; pollDebts.at=Date.now();
+  try{ var r=await botFetch('/api/debts',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({custs:cs})}); if(!r.ok) return;
+    var m={}, ch=false; ((await r.json()).debts||[]).forEach(function(d){ m[d.cust]=d; });
+    pending().forEach(function(x){ if(!custNo(x)) return; var d=m[custNo(x)]||null; if(JSON.stringify(d)!==JSON.stringify(x.debt||null)){ x.debt=d; ch=true; } });
+    if(ch){ save(); if(!document.querySelector('.scrim')) render(); } }catch(e){} }
+function debtHtml(x){ var d=x.debt; if(!d) return '';
+  return '<div class="debtbox" role="alert">⛔ לקוח בחוב — '+money(d.over/100)+' באיחור '+d.late+' ימים (לפי בש״ן, '+esc(String(d.day||'').split('-').reverse().join('/'))+')'+
+    (d.via==='parent'?'<br>החוב רשום על כרטיס החיוב שלו (כרטיס האב).':'')+'<br>לגבות לפני האספקה, או לתאם עם המשרד.</div>'; }
 async function pollMore(){
   if(!BOT_API || bot.status!=='active') return;
   try{
@@ -1788,7 +1802,7 @@ async function pollMore(){
   }catch(e){}
   try{ var rt=await botFetch('/api/tasks'); if(rt.ok){ var jt=await rt.json(), had=(bot.tasks||[]).length; bot.tasks=(jt.tasks||[]).filter(function(x){ return !state.stops.some(function(s){ return s.officeTask===x.id; }); });
     if(bot.tasks.length>had){ toast('🛠 מטלה חדשה מהמשרד'); try{ navigator.vibrate && navigator.vibrate([180,80,180]); }catch(e){} if(!document.querySelector('.scrim')) render(); } } }catch(e){}
-  await pollOffice(); if(bot.backupDirty) doBackup();
+  await pollOffice(); if(bot.backupDirty) await doBackup(); pollDebts();   /* the backup first — the server answers by it (Jarvis, #94) */
   syncPlaces().then(syncStands); flushOutbox(); backfillOutbox(); syncTrucks(); syncFleet(); syncCountLog();
 }
 async function loadOfficeJournal(id){
@@ -2128,7 +2142,7 @@ function viewRoute(){
       '<div class="name">'+esc(c.name)+(c.point?' <span class="tag t-info">📍 '+esc(c.point)+'</span>':'')+'</div>'+
       (custNo(c)||c.fromJournal ? '<div class="custline num">'+(custNo(c)?'צרכן <b>'+esc(custNo(c))+'</b>':'')+(c.fromJournal?' · <span class="tag t-warn">מיומן '+esc(c.fromJournal)+'</span>':'')+'</div>' : '')+
       '<div class="addr">'+esc(addr(c))+'<span class="city">'+esc(c.city)+(c.cityGuess?' ?':'')+(c.hood?' · '+esc(c.hood):'')+'</span></div>'+
-      badge(c)+pills(c)+
+      debtHtml(c)+badge(c)+pills(c)+
       (c.note?'<div class="note">📝 '+esc(c.note)+'</div>':'')+
       ((cpk||mp||cpt)?'<div class="mem"><b>📍 מהפעם הקודמת</b>'+(cpt?'<span>מיקום חנייה שמור'+(cpt.name?' ('+esc(cpt.name)+')':'')+' — Waze ינווט אליו</span>':'')+(cpk?'<span>'+esc(cpk)+'</span>':'')+(mp?'<img src="'+mp+'" alt="עמדת הבלונים של הלקוח">':'')+'</div>':'')+
       actsHtml(c)+
@@ -3084,7 +3098,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.23', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.24', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
