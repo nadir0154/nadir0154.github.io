@@ -257,8 +257,8 @@ document.documentElement.setAttribute('lang','he');
 /* ================= constants ================= */
 var VAT = 1.18;                        /* Bashan stores discounts before VAT */
 /* gross prices (incl. VAT). 1/2 as printed on the BB-454 journal; amgazit codes from Bashan's items table,
-   prices from the price list of 01/10/2026 (GazGalV/Technician/): refill 12 kg 150 / 48 kg 450, deposits 130 / 300 (complete 280 / 750). */
-var PRICE = {'1':150, '2':450, '19':130, '14':90, '15':380, '16':280, 'dep1':130, 'dep2':300};
+   prices from the price list of 01/10/2026 (GazGalV/Technician/): refill 12 kg 150 / 48 kg 450, deposits 130 / 300 (complete 280 / 750). From 04/11/2026 (נדיר): 160 / 480. */
+var PRICE = {'1':160, '2':480, '19':130, '14':90, '15':380, '16':280, 'dep1':130, 'dep2':300};
 var KG = {'1':'12', '2':'48'};         /* Bashan item codes: 1 = 12 kg, 2 = 48 kg */
 /* Items the driver can add in the field */
 var ITEM_NAME = {'1':'12 ק״ג', '2':'48 ק״ג', '19':'אמגזית 5 ק״ג', '14':'אמגזית 2.5 ק״ג', '15':'אמגזית 5 ק״ג קומפלט', '16':'אמגזית 2.5 ק״ג קומפלט',
@@ -353,6 +353,21 @@ state = load();
 save();   /* pins the work day of a day that started on an older version */
 var prices={}; try{ prices=JSON.parse(localStorage.getItem('gazgal-prices')||'{}')||{}; }catch(e){ prices={}; }
 function priceOf(code){ return PRICE[code]!=null ? PRICE[code] : (prices[code]||0); }
+/* נדיר 04/11: "המחיר עודכן בבש״ן, ובאפליקציה עדיין לפי 450". An order typed on the road has no price from Bashan, so it took the number
+   written in the code. Now each journal loaded teaches the phone the refill's price: the price on most of its lines (a customer's
+   special price is not the list), from 3 lines up, and kept. Only a journal not older than the last one seen (Bashan numbers them in order): one printed before the change
+   and loaded again does not bring the old price back (Jarvis, #146). */
+var LIST_LS='gazgal-list-prices', listSeen=0;
+function listOk(v){ return typeof v==='number' && v>=50 && v<=5000; }
+try{ var lp0=JSON.parse(localStorage.getItem(LIST_LS)||'null')||{}; ['1','2'].forEach(function(c){ if(listOk(lp0[c])) PRICE[c]=lp0[c]; }); if(lp0.j>0) listSeen=+lp0.j; }catch(e){}
+function learnListPrices(stops, jno){ var said=[], kept={}, no=+jno||0;
+  if(!no || no<listSeen) return [];
+  ['1','2'].forEach(function(c){ var n={}, all=0, top=null;
+    (stops||[]).forEach(function(s){ (s.items||[]).forEach(function(i){ if(String(i.code)===c && listOk(i.price)){ n[i.price]=(n[i.price]||0)+1; all++; } }); });
+    Object.keys(n).forEach(function(p){ if(top===null || n[p]>n[top]) top=p; });
+    if(all>=3 && n[top]*2>all && +top!==PRICE[c]){ PRICE[c]=+top; kept[c]=+top; said.push(KG[c]+' ק״ג '+money(+top)); } });
+  if(said.length || no>listSeen){ listSeen=no; try{ var was=JSON.parse(localStorage.getItem(LIST_LS)||'null')||{}; was.j=no; Object.keys(kept).forEach(function(c){ was[c]=kept[c]; }); localStorage.setItem(LIST_LS, JSON.stringify(was)); }catch(e){} }
+  return said; }
 
 /* ---------- phone storage for photos and closed days (IndexedDB; localStorage is too small for images) ---------- */
 var dbp=null;
@@ -916,6 +931,7 @@ async function importPdf(file, append){
     check.ok = (check.rCount==null || check.rCount===check.count) && (check.rTotal==null || Math.abs(check.rTotal-check.total)<0.05) && !check.itemsMissing;
     var jno=res.meta.journal||'—';
     res.stops.forEach(function(x){ x.journal=jno; });
+    var learned=learnListPrices(res.stops, res.meta.journal); if(learned.length) setTimeout(function(){ toast('💰 מחיר חדש מהיומן: '+learned.join(' · ')); }, 4000);
     if(append && state.source==='pdf'){
       var have={}; state.stops.forEach(function(x){ have[x.id]=1; });
       var fresh2=res.stops.filter(function(x){ return !have[x.id]; }), skipped=res.stops.length-fresh2.length;
@@ -2792,7 +2808,7 @@ function render(){
 function ordered(s,code){ return s.items.filter(function(i){ return i.code===code; }).reduce(function(t,i){ return t+i.qty; },0); }
 function codesOf(c){ var cs=['1','2']; c.items.forEach(function(i){ if(cs.indexOf(i.code)<0) cs.push(i.code); }); (draft && draft.extra || []).forEach(function(k){ if(cs.indexOf(k)<0) cs.push(k); }); return cs; }
 function labelFor(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; return ex ? itemLabel(ex) : (ITEM_NAME[code]||code); }
-function dPrice(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; if(ex) return ex.price; return draft.price[code]!=null ? draft.price[code] : (prices[code]||priceOf(code)); }
+function dPrice(c,code){ var ex=c.items.filter(function(i){ return i.code===code; })[0]; if(ex) return ex.price; return draft.price[code]!=null ? draft.price[code] : (code==='1'||code==='2' ? PRICE[code] : (prices[code]||priceOf(code))); }
 function dItems(c){
   var out=[];
   codesOf(c).forEach(function(code){ var ex=c.items.filter(function(i){ return i.code===code; })[0];
@@ -3105,7 +3121,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.25', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.26', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
