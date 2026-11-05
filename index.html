@@ -2600,7 +2600,31 @@ function layoutDoc(){
   box.style.zoom=k;
   var wa=document.getElementById('waOffice'); if(wa) wa.href='https://wa.me/'+OFFICE_WA+'?text='+encodeURIComponent(docSource(function(){ return reportText(report()); }));
 }
-function loadScript(src){ return new Promise(function(res,rej){ if(document.querySelector('script[src="'+src+'"]')) return res(); var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+/* נדיר 05/11, the same as in the technician's app (#151): a script that failed once stayed as a tag and counted as loaded, so every later
+   PDF failed until the app was closed; and a second caller did not wait for the first. One load per file; what failed goes, and the next tap tries again */
+var scriptQ={}, SCRIPT_WAIT=25000;
+function loadScript(src){ if(scriptQ[src]) return scriptQ[src];
+  var p=new Promise(function(res,rej){ var s=document.createElement('script'), t=setTimeout(function(){ s.onload=s.onerror=null; s.remove(); rej(new Error('slow')); }, SCRIPT_WAIT);
+    s.src=src; s.onload=function(){ clearTimeout(t); res(); }; s.onerror=function(){ clearTimeout(t); s.remove(); rej(new Error('failed')); }; document.head.appendChild(s); });
+  scriptQ[src]=p; p.catch(function(){ delete scriptQ[src]; }); return p; }
+/* a file that came but is not the library (a login page reads as a script that loaded): forgotten too, or the next tap would get the same answer (ג׳רוויס, #159) */
+function forgetScript(src){ delete scriptQ[src]; var s=document.querySelector('script[src="'+src+'"]'); if(s) s.remove(); }
+async function pdfLibs(){ var L1='vendor/html2canvas.min.js', L2='vendor/jspdf.umd.min.js'; try{ await loadScript(L1); await loadScript(L2); if(!window.html2canvas || !window.jspdf){ forgetScript(L1); forgetScript(L2); throw 0; } }catch(e){ var x=new Error('libs'); x.libs=true; throw x; } }
+/* what the driver is told: the reason is on the screen, to tell us */
+function pdfErr(e, more){ return e && e.libs ? 'רכיב ה־PDF לא נטען. הכול שמור בטלפון. עבור למקום עם קליטה ולחץ שוב.' : 'לא הצלחתי להכין PDF ('+String(e ? (e.name||'')+(e.message?': '+e.message:'') : 'שגיאה').slice(0,60)+'). '+more; }
+function fileSave(file, msg){ var a=document.createElement('a'), u=URL.createObjectURL(file); a.href=u; a.download=file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(u); }, 60000); toast(msg); }
+/* the share sheet opens only right after a tap. A day of several pages takes longer than the phone allows, or an earlier sheet is still open: the file is
+   ready, so one more tap sends it, with saving to the phone beside it. It used to say the PDF failed */
+function fileReady(file, msg){ var old=document.getElementById('pdfReady'); if(old) old.remove();
+  var d=document.createElement('div'); d.id='pdfReady'; d.setAttribute('role','dialog'); d.style.cssText='position:fixed;inset-inline:12px;bottom:84px;z-index:9999;background:var(--surface);color:var(--ink);border:2px solid var(--accent);border-radius:14px;padding:12px;display:grid;gap:8px;box-shadow:0 8px 30px rgba(0,0,0,.5)';
+  d.innerHTML='<b>ה־PDF מוכן</b><button class="btn btn-accent" type="button" data-pr="send">📤 שלח</button><button class="btn btn-ghost btn-sm" type="button" data-pr="save">⬇️ שמור בטלפון</button><button class="btn btn-ghost btn-sm" type="button" data-pr="no">סגור</button>';
+  d.addEventListener('click', function(ev){ var k=ev.target && ev.target.dataset && ev.target.dataset.pr; if(!k) return; d.remove();
+    if(k==='save') fileSave(file, msg);
+    if(k==='send') navigator.share({files:[file], title:file.name}).catch(function(e){ if(!e || e.name!=='AbortError') fileSave(file, msg); }); });
+  document.body.appendChild(d); }
+async function fileShare(file, msg){
+  if(!(navigator.canShare && navigator.canShare({files:[file]}))) return fileSave(file, msg);
+  try{ await navigator.share({files:[file], title:file.name}); }catch(e){ if(!e || e.name!=='AbortError') fileReady(file, msg); } }
 function printPages(){
   /* full-size copy of the pages outside the app, for print and for the PDF */
   var pr=document.getElementById('printRoot'); pr.innerHTML=docSource(docHtml);
@@ -2611,7 +2635,7 @@ function printPages(){
 async function pdfBlob(rec){
   var keep=docRec; docRec=rec;
   try{
-    await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
+    await pdfLibs();
     var pr=printPages(); pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
     var pdf=new window.jspdf.jsPDF({unit:'mm', format:'a4', compress:true}), pages=pr.querySelectorAll('.paper');
     for(var i=0;i<pages.length;i++){
@@ -2619,15 +2643,14 @@ async function pdfBlob(rec){
       if(i) pdf.addPage();
       pdf.addImage(cv.toDataURL('image/jpeg',0.85),'JPEG',0,0,210,297);
     }
-    pr.style.cssText=''; pr.innerHTML='';
     return pdf.output('blob');
-  } finally { docRec=keep; }
+  } finally { docRec=keep; if(pr){ pr.style.cssText=''; pr.innerHTML=''; } }
 }
 function pdfName(rec){ var D=rec?rec.day:state; return 'דוח-נהג-'+isoOf(D.day||D.date)+'-יומן-'+(D.journal||'')+'.pdf'; }
 async function savePdf(){
   var btn=document.getElementById('savePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
-  try{ var a=document.createElement('a'); a.href=URL.createObjectURL(await pdfBlob(docRec)); a.download=pdfName(docRec); document.body.appendChild(a); a.click(); a.remove(); toast('נשמר בטלפון — בתיקיית ההורדות'); }
-  catch(e){ toast('לא הצלחתי להכין PDF. נסה ״הדפס״ ← ״שמור כ־PDF״.'); }
+  try{ fileSave(new File([await pdfBlob(docRec)], pdfName(docRec), {type:'application/pdf'}), 'נשמר בטלפון — בתיקיית ההורדות'); }
+  catch(e){ toast(pdfErr(e,'נסה ״הדפס״ ← ״שמור כ־PDF״.')); }
   btn.disabled=false; btn.textContent='⬇ שמור PDF בטלפון';
 }
 /* FEEDBACK #33: the closed day waits here (in the phone) until there is signal, then goes to the office page and
@@ -2668,14 +2691,8 @@ async function sharePdf(){
   var btn=document.getElementById('sharePdf'); btn.disabled=true; btn.textContent='מכין PDF…';
   try{
     var name=pdfName(docRec);
-    var file=new File([await pdfBlob(docRec)], name, {type:'application/pdf'});
-    if(navigator.canShare && navigator.canShare({files:[file]})){
-      try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
-    } else {
-      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove();
-      toast('ה־PDF ירד לטלפון. שלח אותו מהקבצים.');
-    }
-  }catch(e){ toast('לא הצלחתי להכין PDF. נסה ״הדפס״ ← ״שמור כ־PDF״.'); try{ console.error(e); }catch(_){} }
+    await fileShare(new File([await pdfBlob(docRec)], name, {type:'application/pdf'}), 'ה־PDF ירד לטלפון. שלח אותו מהקבצים.');
+  }catch(e){ toast(pdfErr(e,'נסה ״הדפס״ ← ״שמור כ־PDF״.')); try{ console.error(e); }catch(_){} }
   btn.disabled=false; btn.textContent='📤 שתף PDF';
 }
 /* yesterday's balances, in the paper form's own two rows. Filled from the last close on this phone; typing here
@@ -3138,7 +3155,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.27', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.28', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -3699,7 +3716,7 @@ function dnPaper(c){
 function dnName(c){ return 'תעודת-משלוח-'+dnNo(c.dn.no)+'.pdf'; }
 function dnPdf(c){ return paperPdf(dnPaper(c)); }
 async function paperPdf(paper){
-  await loadScript('vendor/html2canvas.min.js'); await loadScript('vendor/jspdf.umd.min.js');
+  await pdfLibs();
   var pr=document.getElementById('printRoot'); pr.innerHTML=paper; pr.style.cssText='display:block;position:fixed;top:0;left:-10000px;width:794px';
   try{
     var cv=await window.html2canvas(pr.querySelector('.paper'),{scale:2, backgroundColor:'#ffffff', logging:false}), h=Math.round(210*cv.height/cv.width);
@@ -3714,13 +3731,8 @@ async function dnShare(id, saveOnly, pc){
   var name=pc ? 'אישור-תשלום-'+(c.orderNo||c.id)+'.pdf' : dnName(c);
   try{
     var file=new File([await (pc ? paperPdf(paycfPaper(c)) : dnPdf(c))], name, {type:'application/pdf'});
-    if(!saveOnly && navigator.canShare && navigator.canShare({files:[file]})){
-      try{ await navigator.share({files:[file], title:name}); }catch(e){ if(e && e.name!=='AbortError') throw e; }
-    } else {
-      var a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; document.body.appendChild(a); a.click(); a.remove();
-      toast(saveOnly?'נשמר בטלפון — בתיקיית ההורדות':'ה־PDF ירד לטלפון. שלח אותו ללקוח מהקבצים.');
-    }
-  }catch(e){ toast('לא הצלחתי להכין PDF. נסה שוב.'); }
+    if(saveOnly) fileSave(file,'נשמר בטלפון — בתיקיית ההורדות'); else await fileShare(file,'ה־PDF ירד לטלפון. שלח אותו ללקוח מהקבצים.');
+  }catch(e){ toast(pdfErr(e,'נסה שוב.')); }
   if(btn){ btn.disabled=false; btn.textContent=lbl; }
 }
 
