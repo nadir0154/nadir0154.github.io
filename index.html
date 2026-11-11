@@ -467,6 +467,9 @@ function hoMsg(R){ var h=state.handover, g=hoGap(R);
 function payGap(s){ var p=s.result && s.result.payment; if(!p || p.owed==null || p.method==='none') return 0; return Math.round((p.amount-p.owed)*100)/100; }
 function gapText(s){ var g=payGap(s); return !g ? '' : g<0 ? 'שולם פחות — נשאר חוב '+money(-g)+' (לגבייה '+money(s.result.payment.owed)+')' : 'עודף '+money(g)+' — לשיוך במשרד (חוב ישן / זכות)'; }
 function toast(msg){ var r=document.getElementById('toastRoot'); r.innerHTML='<div class="toast" role="status">'+esc(msg)+'</div>'; clearTimeout(toast.t); toast.t=setTimeout(function(){ r.innerHTML=''; },2600); }
+/* #174: a deletion that can be undone — at once, with "↶ בטל" for 10 seconds (no "press again") */
+function toastUndo(msg, undo){ var r=document.getElementById('toastRoot'); r.innerHTML='<div class="toast" role="status">'+esc(msg)+' <button class="linkish" type="button" id="toastUndo" style="color:inherit;text-decoration:underline;font-weight:800">↶ בטל</button></div>'; clearTimeout(toast.t);
+  document.getElementById('toastUndo').onclick=function(){ clearTimeout(toast.t); r.innerHTML=''; undo(); }; toast.t=setTimeout(function(){ r.innerHTML=''; },10000); }
 function readPhoto(file,cb){
   if(!file) return; var fr=new FileReader();
   fr.onload=function(){ var img=new Image(); img.onload=function(){
@@ -2089,7 +2092,8 @@ function journalsCard(){
         '<span style="display:flex;gap:6px">'+(many && state.phase==='route'?'<button class="btn btn-ghost btn-sm" style="min-height:40px" type="button" data-activej="'+esc(j.no)+'">הצג</button>':'')+
         '<button class="btn btn-ghost btn-sm" style="min-height:40px" type="button" data-deljournal="'+esc(j.no)+'" aria-label="הסר את יומן '+esc(j.no)+'">🗑 הסר</button></span></div>'; }).join('')+
     '<label class="filebtn">➕ הוסף יומן נוסף<input type="file" id="impAdd" accept=".pdf,application/pdf"></label>'+
-    '<button class="btn btn-ghost btn-sm" type="button" data-sheet="resetday">↺ נקה הכל ותתחיל מחדש</button></section>';
+    /* #174: the most dangerous button of the app — no longer right under "הוסף יומן": under "עוד", red */
+    '<details style="margin-top:14px"><summary class="muted" style="cursor:pointer">עוד…</summary><button class="btn btn-ghost btn-sm" style="color:var(--bad);border-color:var(--bad);margin-top:10px" type="button" data-sheet="resetday">↺ נקה הכל ותתחיל מחדש</button></details></section>';
 }
 function journalChips(){
   if(state.journals.length<2) return '';
@@ -2752,7 +2756,7 @@ function viewEnd(){
   '<div class="field"><label for="dayNote">הערות נוספות לדוח</label><textarea class="inp" id="dayNote" placeholder="נכנס ל״הערות נוספות״ בטופס">'+esc(state.dayNote||'')+'</textarea></div>'+
   '</section>'+
   '<button class="btn btn-accent" type="button" data-view="doc">📄 הדוח לפקידה — PDF / הדפסה</button>'+
-  (state.source==='pdf'?'<button class="btn btn-ok" type="button" data-sheet="close">🔒 סגור יום ושמור בארכיון</button>':'<button class="btn btn-ghost btn-sm" type="button" data-sheet="close">התחל יום חדש</button>')+
+  (state.source==='pdf'?'<button class="btn btn-ok" style="margin-top:22px" type="button" data-sheet="close">🔒 סגור יום ושמור בארכיון</button>':'<button class="btn btn-ghost btn-sm" style="margin-top:22px" type="button" data-sheet="close">התחל יום חדש</button>')+
   '<button class="btn btn-ghost btn-sm" type="button" data-view="history">📚 דוחות קודמים</button>'+
   '</main>';
 }
@@ -2920,7 +2924,8 @@ function openSheet(kind,preset){
     var hd=done().filter(function(x){ return x.status==='delivered'; }), ct=cashTotals();
     html='<h2>לנקות הכל ולהתחיל מחדש?</h2><p style="margin:0">היומנים, ההזמנות והסימונים של היום יימחקו, ואפשר לייבא יומן מחדש. <b>ספירות המלאי ומה שנשמר על חניות — נשארים.</b></p>'+
       (hd.length ? '<div class="note">⚠ כבר סומנו '+hd.length+' אספקות'+(ct.cash+ct.cheque?' ו־'+money(ct.cash+ct.cheque)+' בקופה':'')+'. גם הן יימחקו. אם היום אמיתי — עדיף ״סגור יום״, שם הדוח נשמר.</div>' : '')+
-      '<button class="btn btn-bad" type="button" id="confirmResetDay">כן, נקה והתחל מחדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';
+      '<div class="field"><label for="resetWord">כדי לאשר — הקלד <b>נקה</b></label><input class="inp" id="resetWord" autocomplete="off" oninput="document.getElementById(\'confirmResetDay\').disabled=this.value.trim()!==\'נקה\'"></div>'+
+      '<button class="btn btn-bad" type="button" id="confirmResetDay" disabled>כן, נקה והתחל מחדש</button><button class="btn btn-ghost btn-sm" type="button" data-close>ביטול</button>';   /* #174, נדיר: "נקה" before it opens */
   }
   if(kind==='office'){
     if(!(officeIn && officeIn.blob)) draft={};
@@ -3160,7 +3165,7 @@ function showErr(id,msg){ var e=document.getElementById(id); e.hidden=false; e.t
    and amounts are today's), and only the driver's own input is laid back on top. Photos are not kept — taken again.
    A stop that was closed or changed meanwhile (the office cancelled, another phone, a re-order) is NOT restored, and the
    confirm functions check again before writing — so an interrupted sheet can never write onto a non-pending stop. */
-var APP_VER='3.30', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
+var APP_VER='3.31', RESUME_LS='gazgal-ui-resume', RESUME_KINDS=['deliver','fail','hot','task','mktask','count','facility','safety','split','fuel','fault','pastecounts','close','order'];
 var STOP_KINDS=['deliver','fail','safety','split'];   /* these write to one stop — restored only while it is still pending */
 var sheetKind='', sheetPreset='', sheetStop='', resumeT=null;
 function clearResume(){ clearTimeout(resumeT); try{ localStorage.removeItem(RESUME_LS); }catch(e){} }
@@ -3998,7 +4003,9 @@ document.addEventListener('click',function(ev){
       '<button class="btn btn-accent" type="button" data-sheet="count" data-preset="'+ME()+'|ספירה ביניים|now">🔢 ספירה עכשיו — ממולא מראש, רק לתקן</button>'+
       '<button class="btn btn-ghost btn-sm" type="button" data-close>אחר כך</button>';
     toast('נשמר ✓'); return; }
-  if(ds.delfac){ delFac(ds.delfac); render(); toast('נמחק'); return; }
+  if(ds.delfac){ var fi=state.facility.findIndex(function(f){ return f.id===ds.delfac; }), fx=state.facility[fi], fph=photos['pink-'+ds.delfac]; delFac(ds.delfac); render();
+    if(fx && !fx.swap) toastUndo('נמחק', function(){ state.facility.splice(Math.min(fi, state.facility.length), 0, fx); if(fph){ photos['pink-'+fx.id]=fph; savePhotos(); } save(); render(); toast('הוחזר'); }); else toast('נמחק');   /* #174: a plain record comes back; a truck swap moved trucks — not undone here */
+    return; }
   if(t.id==='offRead'){ var ot=(document.getElementById('offText').value||'').trim(), ob=draft && draft.offImg;
     if(!ob && !ot){ toast('בחר צילום או הדבק את הטקסט'); return; }
     fetch(ob||'data:,').then(function(r){ return ob ? r.blob() : null; }).then(function(b){ officeIn={blob:b, text:ot}; t.hidden=true; runOffice(); }); return; }
@@ -4034,7 +4041,7 @@ document.addEventListener('click',function(ev){
       if(nj){ state.journal=nj.no; state.date=nj.date||state.date; state.check=nj.check||null; state.stops.forEach(function(x){ if(x.hot && x.journal===rj) x.journal=nj.no; }); }
       else { state=migrate(Object.assign(fresh(state), {start:state.start, day:state.day, facility:state.facility, dayNote:state.dayNote})); } }
     after('יומן '+rj+' הוסר'); return; }
-  if(t.id==='confirmResetDay'){ var kept=state; photos={}; savePhotos();
+  if(t.id==='confirmResetDay'){ if(t.disabled || ((document.getElementById('resetWord')||{}).value||'').trim()!=='נקה') return; var kept=state; photos={}; savePhotos();
     state=migrate(Object.assign(fresh(kept), {start:kept.start, day:kept.day, facility:kept.facility, dayNote:kept.dayNote}));
     after('נוקה. אפשר לייבא יומן מחדש.'); return; }
   if(t.id==='loadSample'){ var ks=state; state=migrate(Object.assign(sampleDay(), {phase:'morning', view:'route', start:ks.start, counts:ks.counts, memory:ks.memory})); after('נטען יומן לדוגמה — הנתונים מומצאים'); return; }
@@ -4052,8 +4059,8 @@ document.addEventListener('click',function(ev){
     document.querySelectorAll('[data-ord]').forEach(function(b){ var n=draft.seq.indexOf(b.dataset.ord); b.classList.toggle('sel', n>=0); document.getElementById('ordn-'+b.dataset.ord).textContent = n>=0 ? (n+1) : '·'; });
     return; }
   if(ds.delcount){
-    if(t.dataset.armed){ state.counts=state.counts.filter(function(x){ return x.id!==ds.delcount; }); save(); render(); toast('הספירה נמחקה'); }
-    else { t.dataset.armed='1'; t.textContent='לחץ שוב למחיקה'; t.style.color='var(--bad)'; t.style.borderColor='var(--bad)'; }
+    var ci=state.counts.findIndex(function(x){ return x.id===ds.delcount; }), cx=state.counts[ci]; if(ci<0) return;
+    state.counts.splice(ci,1); save(); render(); toastUndo('הספירה נמחקה', function(){ state.counts.splice(Math.min(ci, state.counts.length), 0, cx); save(); render(); toast('הספירה הוחזרה'); });   /* #174 */
     return; }
   if(ds.step){
     var k=ds.step, o=document.getElementById('o-'+k), v=Math.max(0,(parseInt(o.textContent,10)||0)+(+ds.d)); o.textContent=v;
